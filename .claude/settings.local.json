@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"D:\\\\mygit\\\\site-analysis\" -Recurse -Force)",
+      "Bash(Select-Object FullName)",
+      "Bash(npx tsc *)",
+      "Bash(node -e \"require\\('./routes/demand-mix'\\); console.log\\('demand-mix OK'\\)\")",
+      "Bash(node -e \"require\\('./routes/demand-mix'\\); console.log\\('OK'\\)\")",
+      "Bash(node -e \"require\\('./server'\\)\")",
+      "Bash(kill %1)",
+      "Bash(node -e ' *)",
+      "Bash(node scripts/diagnose-tagging.js 12.9382 77.5631 500)"
+    ]
+  }
+}

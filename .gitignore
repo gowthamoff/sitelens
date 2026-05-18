@@ -1,0 +1,62 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+venv/
+env/
+.venv/
+
+# Environment Variables (CRITICAL)
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Build Artifacts
+dist/
+build/
+dist-ssr/
+*.egg-info/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Server temp / logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+tmp/
+
+# Python / Data
+data/
+*.tif
+*.png
+*.jpg
+*.jpeg
+*.geojson
+*.shp
+*.shx
+*.dbf
+*.prj
+
+# Backup / Zips
+*.zip
+*.tar.gz
+*.dump
+site_analysis_backup.dump
+
+# Temporary / test scripts
+server/check_tables.js
+server/check_columns.js
+server/test_db.js
+server/test_logic.js
+server/test_landuse.js

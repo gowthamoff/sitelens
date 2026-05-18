@@ -1,0 +1,64 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Database Infrastructure: RDS PostgreSQL instance'
+
+Parameters:
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of Private Subnet IDs for RDS
+  DbSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security Group ID for the RDS instance
+  DbInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+    Description: DB instance class
+    AllowedValues: [db.t3.micro, db.t4g.micro]
+  DbName:
+    Type: String
+    Default: osm-tn
+    Description: Initial database name
+  DbUser:
+    Type: String
+    Default: postgres
+    Description: Master username for RDS
+  DbPassword:
+    Type: String
+    NoEcho: true
+    Description: Master password for RDS (at least 8 chars)
+    MinLength: 8
+
+Resources:
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: "Database subnet group for private subnets"
+      SubnetIds: !Ref PrivateSubnetIds
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: postgres
+      EngineVersion: "15"
+      DBInstanceClass: !Ref DbInstanceClass
+      DBName: !Ref DbName
+      MasterUsername: !Ref DbUser
+      MasterUserPassword: !Ref DbPassword
+      AllocatedStorage: 20
+      StorageType: gp2
+      PubliclyAccessible: false
+      VPCSecurityGroups:
+        - !Ref DbSecurityGroupId
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      MultiAZ: false # Stay in free tier
+
+Outputs:
+  DbEndpointExport:
+    Description: RDS Database Endpoint Address
+    Value: !GetAtt Database.Endpoint.Address
+    Export:
+      Name: !Sub "${AWS::StackName}-DbEndpoint"
+  DbPortExport:
+    Description: RDS Database Port
+    Value: !GetAtt Database.Endpoint.Port
+    Export:
+      Name: !Sub "${AWS::StackName}-DbPort"

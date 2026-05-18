@@ -1,0 +1,196 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Backend Infrastructure: EC2 App Server and Application Load Balancer'
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the VPC where resources will be deployed
+  PublicSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of Public Subnet IDs for the ALB
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of Private Subnet IDs for EC2
+  AppSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security Group ID for the EC2 application instance
+  AlbSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security Group ID for the Application Load Balancer
+  Ec2InstanceProfileName:
+    Type: String
+    Description: Name of the IAM Instance Profile for the EC2 instance
+  DockerImageUrl:
+    Type: String
+    Description: "The URL of your image (e.g., your-ecr-uri/site-analysis:latest)"
+  DatabaseStackName:
+    Type: String
+    Description: "The name of your deployed Database stack (used to import values)"
+  KeyName:
+    Type: String
+    Default: ""
+    Description: "(Optional) Name of an existing EC2 KeyPair to enable SSH access."
+  DbName:
+    Type: String
+    Default: osm-tn
+    Description: Database name (must match Database stack)
+  DbUser:
+    Type: String
+    Default: postgres
+    Description: Database username (must match Database stack)
+  DbPassword:
+    Type: String
+    NoEcho: true
+    Description: Database password (must match Database stack)
+  GooglePlacesKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: "Google Places API key for Competitor tab enrichment. Get one at https://console.cloud.google.com/apis/credentials"
+
+Conditions:
+  HasKeyName: !Not [ !Equals [ !Ref KeyName, "" ] ]
+
+Resources:
+  SiteAnalysisAppServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro # Free Tier eligible in ap-south-1
+      ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64}}'
+      KeyName: !If [HasKeyName, !Ref KeyName, !Ref "AWS::NoValue"]
+      IamInstanceProfile: !Ref Ec2InstanceProfileName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true # NEEDED for direct IGW access
+          DeviceIndex: 0
+          SubnetId: !Select [0, !Ref PublicSubnetIds]
+          GroupSet:
+            - !Ref AppSecurityGroupId
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              #!/bin/bash
+              yum update -y
+              yum install -y docker
+              systemctl start docker
+              systemctl enable docker
+              usermod -aG docker ec2-user
+              
+              # Log in to ECR (needed for private images)
+              aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+
+              # Start the container from the provided Docker image
+              docker run -d -p 8080:8080 --name site-analysis-api \
+                -e "DB_TARGET=rds" \
+                -e "RDS_HOST=${ImportedDbHost}" \
+                -e "RDS_PORT=${ImportedDbPort}" \
+                -e "RDS_DB=${DbName}" \
+                -e "RDS_USER=${DbUser}" \
+                -e "RDS_PASS=${DbPassword}" \
+                -e "PORT=8080" \
+                -e "NDVI_SERVICE_URL=http://localhost:8000" \
+                -e "GOOGLE_PLACES_KEY=${GooglePlacesKey}" \
+                --restart unless-stopped \
+                ${DockerImageUrl}
+
+              # Setup and Run Martin Container
+              export DATABASE_URL="postgresql://${DbUser}:${DbPassword}@${ImportedDbHost}:${ImportedDbPort}/${DbName}"
+              docker run -d -p 3000:3000 --name martin_server \
+                -e DATABASE_URL=$DATABASE_URL \
+                -e WATCH_MODE=true \
+                --restart unless-stopped \
+                ghcr.io/maplibre/martin --route-prefix /tiles --auto-bounds skip
+
+              # ── NDVI Python Service ──
+              # Pulled from ECR — internal only, not exposed via ALB.
+              # Node.js proxies /api/ndvi/* to this container on port 8000.
+              # Memory limited to 1800m (leaves ~200m headroom on t3.medium).
+              ECR_NDVI="398069593534.dkr.ecr.${AWS::Region}.amazonaws.com/site-analysis/ndvi-service"
+              aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin 398069593534.dkr.ecr.${AWS::Region}.amazonaws.com
+              docker pull $ECR_NDVI:latest
+              docker run -d -p 8000:8000 --name ndvi-service \
+                -e PYTHONUNBUFFERED=1 \
+                --memory=1800m \
+                --restart unless-stopped \
+                $ECR_NDVI:latest
+            - ImportedDbHost: !ImportValue 
+                Fn::Sub: "${DatabaseStackName}-DbEndpoint"
+              ImportedDbPort: !ImportValue
+                Fn::Sub: "${DatabaseStackName}-DbPort"
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-AppServer"
+
+  AppTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Port: 8080
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      TargetType: instance
+      HealthCheckPath: /health
+      HealthCheckPort: "8080"
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Targets:
+        - Id: !Ref SiteAnalysisAppServer
+
+  MartinTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Port: 3000
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      TargetType: instance
+      HealthCheckPath: /catalog
+      HealthCheckPort: "3000"
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Targets:
+        - Id: !Ref SiteAnalysisAppServer
+
+  AppLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Subnets: !Ref PublicSubnetIds
+      SecurityGroups:
+        - !Ref AlbSecurityGroupId
+      Type: application
+
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref AppLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref AppTargetGroup
+
+  HttpListenerRuleMartin:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HttpListener
+      Priority: 10
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /tiles/*
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref MartinTargetGroup
+
+Outputs:
+  AlbDnsName:
+    Description: DNS Name of the Application Load Balancer
+    Value: !GetAtt AppLoadBalancer.DNSName
+  AppServerId:
+    Description: Instance ID of the EC2 App Server
+    Value: !Ref SiteAnalysisAppServer

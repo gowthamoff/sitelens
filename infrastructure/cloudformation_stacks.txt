@@ -1,0 +1,8 @@
+# AWS CloudFormation Stack Names
+# Sourced from AWS Console
+
+SECURITY_STACK="your-security-stack"
+BACKEND_STACK="your-backend-stack"
+DATABASE_STACK="your-database-stack"
+VPC_STACK="your-vpc-stack"
+ECR_STACK="your-ecr-stack"

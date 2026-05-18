@@ -1,0 +1,65 @@
+# ─── docker-compose.yml ───────────────────────────────────────
+# Updated to include the NDVI service alongside your existing
+# Node.js backend and Martin tile server.
+#
+# All three containers share a Docker network, so they can
+# talk to each other via container names (like localhost but
+# using service names: 'backend', 'ndvi-service', 'martin').
+# ──────────────────────────────────────────────────────────────
+
+version: "3.8"
+
+services:
+  # ── Your existing Node.js backend ──
+  backend:
+    image: ${ECR_REPO_BACKEND}:latest     # Your existing ECR image
+    container_name: site-analysis-backend
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - NDVI_SERVICE_URL=http://ndvi-service:8000  # ← NEW: tells Node where Python lives
+    depends_on:
+      ndvi-service:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  # ── Your existing Martin tile server ──
+  martin:
+    image: ghcr.io/maplibre/martin:latest
+    container_name: martin-tiles
+    ports:
+      - "3001:3000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+    networks:
+      - app-network
+
+  # ── NEW: NDVI Python service ──
+  ndvi-service:
+    image: ${ECR_REPO_NDVI}:latest        # New ECR repo for NDVI
+    container_name: ndvi-service
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1                 # See Python logs in real-time
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s                    # Give it time to boot
+    deploy:
+      resources:
+        limits:
+          memory: 2G                       # NDVI computation is memory-hungry
+          cpus: "1.5"
+        reservations:
+          memory: 512M
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
