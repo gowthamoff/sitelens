@@ -60,3 +60,11 @@ server/check_columns.js
 server/test_db.js
 server/test_logic.js
 server/test_landuse.js
+
+# Whitelist project assets and images so they are tracked by Git
+!/assets/
+!/assets/**
+!/client/public/logo.png
+!/client/src/assets/
+!/client/src/assets/**
+
