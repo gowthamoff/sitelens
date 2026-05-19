@@ -26,7 +26,7 @@ Merges live Google Places API data with OSM geometries to map competitors with e
 *   **Strategic Moats**: Identifies physical barriers (major roads, railways) and footfall anchors (hospitals, colleges) that shield you from competition.
 *   **Opportunity Gaps**: Automatically flags highly populated zones that lack specific amenities (e.g., a large tech park with zero cafes within 300m), highlighting immediate expansion opportunities.
 
-![Competitor Intelligence](./assets/cannibalize.png)
+![Competitor Intelligence](./assets/competitors.png)
 ![Opportunity Gaps](./assets/gaps.png)
 
 ### 🛡️ Cannibalization Risk Engine
