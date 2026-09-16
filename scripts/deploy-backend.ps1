@@ -7,7 +7,8 @@ param (
     [string]$DbName = "",
     [string]$DbUser = "",
     [string]$DbPass = "",
-    [string]$GooglePlacesKey = ""
+    [string]$GooglePlacesKey = "",
+    [string]$JwtSecret = ""
 )
 
 # Try to load .env file from server folder
@@ -30,6 +31,12 @@ if ([string]::IsNullOrEmpty($DbName)) { $DbName = $env:RDS_DB }
 if ([string]::IsNullOrEmpty($DbUser)) { $DbUser = $env:RDS_USER }
 if ([string]::IsNullOrEmpty($DbPass)) { $DbPass = $env:RDS_PASS }
 if ([string]::IsNullOrEmpty($GooglePlacesKey)) { $GooglePlacesKey = $env:GOOGLE_PLACES_KEY }
+if ([string]::IsNullOrEmpty($JwtSecret)) { $JwtSecret = $env:JWT_SECRET }
+
+if ([string]::IsNullOrEmpty($JwtSecret)) {
+    Write-Host "ERROR: JWT_SECRET not found (param or server/.env). The container runs NODE_ENV=production and will exit without it." -ForegroundColor Red
+    exit 1
+}
 
 if ([string]::IsNullOrEmpty($RepositoryUri)) {
     Write-Host "ERROR: ECR_REPO_BACKEND not found in .env!" -ForegroundColor Red
@@ -45,7 +52,16 @@ if ([string]::IsNullOrEmpty($DbHost)) {
 Write-Host "Logging into AWS ECR..." -ForegroundColor Cyan
 # Extract registry root (the part before the first '/')
 $RegistryRoot = $RepositoryUri.Split('/')[0]
-aws ecr get-login-password --region $Region | docker login --username AWS --password-stdin $RegistryRoot
+# NOTE: Run the get-login-password | docker login pipe inside cmd.exe.
+# In PowerShell, piping a native command's output to another native command's
+# stdin re-encodes the stream (UTF-16/newline injection), which corrupts the
+# ECR auth token and makes `docker login` fail with "400 Bad Request".
+# cmd.exe passes the bytes through raw, so --password-stdin receives a clean token.
+cmd /c "aws ecr get-login-password --region $Region | docker login --username AWS --password-stdin $RegistryRoot"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: ECR login failed (exit $LASTEXITCODE). Aborting." -ForegroundColor Red
+    exit 1
+}
 
 # 2. Build Image
 Write-Host "Building Docker Image..." -ForegroundColor Cyan
@@ -59,6 +75,11 @@ if (Test-Path "./package.json") {
     docker build -t site-analysis ./server
 }
 
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: Docker build failed (exit $LASTEXITCODE). Aborting." -ForegroundColor Red
+    exit 1
+}
+
 # 3. Tag Image
 Write-Host "Tagging Image..." -ForegroundColor Cyan
 docker tag site-analysis:latest "${RepositoryUri}:latest"
@@ -66,6 +87,10 @@ docker tag site-analysis:latest "${RepositoryUri}:latest"
 # 4. Push Image
 Write-Host "Pushing Image to ECR..." -ForegroundColor Cyan
 docker push "${RepositoryUri}:latest"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: Image push to ECR failed (exit $LASTEXITCODE). Aborting before remote rollout." -ForegroundColor Red
+    exit 1
+}
 
 # 5. Remote Update via SSM (The Automation Step)
 Write-Host "`nAutomation: Triggering Remote Update on EC2..." -ForegroundColor Yellow
@@ -86,7 +111,11 @@ $RemoteCommands = @(
     "sudo docker stop site-analysis-api || true",
     "sudo docker rm site-analysis-api || true",
     "sudo docker rmi `$(sudo docker images -f dangling=true -q) || true",
-    "sudo docker run -d -p 8080:8080 --name site-analysis-api --restart unless-stopped -e NODE_ENV=production -e DB_TARGET=rds -e RDS_HOST=$DbHost -e RDS_PORT=5432 -e RDS_DB=$DbName -e RDS_USER=$DbUser -e RDS_PASS='$DbPass' -e PORT=8080 -e NDVI_SERVICE_URL=http://localhost:8000 -e GOOGLE_PLACES_KEY='$GooglePlacesKey' ${RepositoryUri}:latest"
+    # Shared network + Redis cache (recreate is fine — cache repopulates).
+    "sudo docker network create app-net || true",
+    "sudo docker rm -f redis || true",
+    "sudo docker run -d --name redis --network app-net --restart unless-stopped redis:7-alpine --maxmemory 128mb --maxmemory-policy allkeys-lru",
+    "sudo docker run -d -p 8080:8080 --name site-analysis-api --network app-net --restart unless-stopped -e NODE_ENV=production -e DB_TARGET=rds -e RDS_HOST=$DbHost -e RDS_PORT=5432 -e RDS_DB=$DbName -e RDS_USER=$DbUser -e RDS_PASS='$DbPass' -e PORT=8080 -e NDVI_SERVICE_URL=http://localhost:8000 -e GOOGLE_PLACES_KEY='$GooglePlacesKey' -e JWT_SECRET='$JwtSecret' -e JWT_EXPIRES_IN=7d -e REDIS_URL=redis://redis:6379 ${RepositoryUri}:latest"
 )
 
 # Convert commands to JSON for safe passing

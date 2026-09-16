@@ -9,7 +9,23 @@
       "Bash(node -e \"require\\('./server'\\)\")",
       "Bash(kill %1)",
       "Bash(node -e ' *)",
-      "Bash(node scripts/diagnose-tagging.js 12.9382 77.5631 500)"
+      "Bash(node scripts/diagnose-tagging.js 12.9382 77.5631 500)",
+      "PowerShell(& \"D:\\\\demo\\\\sitelens\\\\scripts\\\\db-tunnel.ps1\")",
+      "Bash(unset SITELENS_DB_URL)",
+      "Bash(\"/d/demo/sitelens/.venv-geo/Scripts/python.exe\" \"/d/demo/sitelens/context2-learning-only/learning-files/day1_connect_test.py\")",
+      "Bash(\"/d/demo/sitelens/.venv-geo/Scripts/python.exe\" \"/d/demo/sitelens/context2-learning-only/learning-files/day2_crs_and_plot.py\")",
+      "Bash(\"/d/demo/sitelens/.venv-geo/Scripts/python.exe\" -c \"import pyarrow, pyogrio, geopandas; print\\('pyarrow', pyarrow.__version__\\); print\\('pyogrio', pyogrio.__version__\\); print\\('GDAL via pyogrio:', __import__\\('pyogrio'\\).__gdal_version__ if hasattr\\(__import__\\('pyogrio'\\),'__gdal_version__'\\) else 'n/a'\\)\")",
+      "Bash(\"/d/demo/sitelens/.venv-geo/Scripts/python.exe\" -m pip install pyarrow --quiet)",
+      "Bash(\"/d/demo/sitelens/.venv-geo/Scripts/python.exe\" -c \"import pyarrow, pyogrio; print\\('pyarrow', pyarrow.__version__, '| pyogrio', pyogrio.__version__\\)\")",
+      "PowerShell(code *)",
+      "Bash(\"d:/demo/sitelens/.venv-geo/Scripts/python.exe\" -c \"import duckdb; print\\('duckdb', duckdb.__version__\\)\")",
+      "Bash(\"d:/demo/sitelens/.venv-geo/Scripts/python.exe\" -c \"import geopandas; print\\('geopandas', geopandas.__version__\\)\")",
+      "Bash(powershell.exe *)",
+      "PowerShell($chrome = @\\(\"$env:ProgramFiles\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe\", \"${env:ProgramFiles\\(x86\\)}\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe\", \"$env:LOCALAPPDATA\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe\", \"$env:ProgramFiles\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe\"\\) | Where-Object { Test-Path $_ } | Select-Object -First 1; $chrome)",
+      "PowerShell(Start-Process chrome \"D:\\\\demo\\\\sitelens\\\\doc\\\\update\\\\Interview-Prep-Geospatial-Data-Engineer.pdf\"; \"opened\")",
+      "Bash(docker exec *)",
+      "Bash(/d/demo/sitelens/.venv-geo/Scripts/python.exe *)",
+      "Bash('/c/Program Files \\(x86\\)/Google/Chrome/Application/chrome.exe' --headless --disable-gpu --no-first-run '--user-data-dir=C:\\\\Users\\\\aks\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\D--demo-sitelens\\\\6a8ba69e-1254-49b1-a2e8-039a516ad39e\\\\scratchpad\\\\chrome-pdf' --no-pdf-header-footer '--print-to-pdf=D:\\\\demo\\\\sitelens\\\\resume\\\\Gowtham-P-Geospatial-Engineer.pdf' file:///D:/demo/sitelens/doc/update/Gowtham-P-Geospatial-Engineer.html)"
     ]
   }
 }

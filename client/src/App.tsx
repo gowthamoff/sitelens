@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
+import { AuthProvider } from './context/AuthContext';
+import { AuthGate } from './features/auth/AuthGate';
 import { AnalysisProvider, useAnalysis } from './context/AnalysisContext';
 import { Header } from './components/layout/Header';
 import { MapContainer } from './components/map/MapContainer';
@@ -325,9 +327,13 @@ function MainLayout() {
 
 function App() {
   return (
-    <AnalysisProvider>
-      <MainLayout />
-    </AnalysisProvider>
+    <AuthProvider>
+      <AuthGate>
+        <AnalysisProvider>
+          <MainLayout />
+        </AnalysisProvider>
+      </AuthGate>
+    </AuthProvider>
   );
 }
 

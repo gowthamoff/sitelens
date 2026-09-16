@@ -6,6 +6,10 @@ __pycache__/
 venv/
 env/
 .venv/
+.venv*/
+*venv/
+ENV/
+.python-version
 
 # Environment Variables (CRITICAL)
 .env
@@ -49,10 +53,18 @@ data/
 *.prj
 
 # Backup / Zips
+backups/
 *.zip
 *.tar.gz
 *.dump
 site_analysis_backup.dump
+
+# Local cache - non-app / least-used files (NOT deployed to GitHub)
+_cache/
+out/
+*.pbf
+*.parquet
+*.gpkg
 
 # Temporary / test scripts
 server/check_tables.js

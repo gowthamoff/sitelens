@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  SiteLens Stack 3 - EC2 app (FastAPI in Docker), free-tier t3.micro in a public
+  subnet. Imports the App security group + public subnet from the network stack and
+  the DB endpoint from the database stack. user-data installs Docker + git, clones
+  the repo, builds the image, and runs it on port 80. SSM Session Manager is enabled
+  so you can connect WITHOUT an SSH key.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: sitelens
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    Description: Free-tier eligible (t2.micro / t3.micro).
+  RepoUrl:
+    Type: String
+    Description: >
+      Git URL of the SiteLens repo. Public = https://github.com/you/sitelens.git.
+      Private = https://<TOKEN>@github.com/you/sitelens.git (a read-only PAT/deploy token).
+  DbPassword:
+    Type: String
+    NoEcho: true
+    Description: RDS master password (same one used in Stack 2).
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    Default: change-me-in-prod-0123456789
+  KeyName:
+    Type: String
+    Default: ''
+    Description: (Optional) EC2 key pair for SSH. Leave blank to use SSM Session Manager only.
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Conditions:
+  HasKey: !Not [!Equals [!Ref KeyName, '']]
+
+Resources:
+
+  Ec2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-ec2-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore   # Session Manager (no SSH key needed)
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Stack, Value: app }
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [ !Ref Ec2Role ]
+
+  AppInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestAmiId
+      IamInstanceProfile: !Ref InstanceProfile
+      KeyName: !If [HasKey, !Ref KeyName, !Ref 'AWS::NoValue']
+      SubnetId: !Select [0, !Split [',', !ImportValue 'sitelens-PublicSubnetIds']]
+      SecurityGroupIds:
+        - !ImportValue 'sitelens-AppSecurityGroupId'
+      Tags:
+        - { Key: Name, Value: !Sub '${ProjectName}-app' }
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Stack, Value: app }
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              #!/bin/bash
+              set -eux
+              dnf update -y
+              dnf install -y docker git
+              systemctl enable --now docker
+              usermod -aG docker ec2-user
+
+              cd /opt
+              git clone ${RepoUrl} sitelens || (cd /opt/sitelens && git pull)
+
+              cat > /opt/sitelens/backend.env <<EOF
+              RDS_HOST=${DbHost}
+              RDS_PORT=5432
+              RDS_DB=${DbNameV}
+              RDS_USER=postgres
+              RDS_PASS=${DbPassword}
+              RDS_SSLMODE=require
+              JWT_SECRET=${JwtSecret}
+              JWT_EXPIRES_IN=7d
+              ALLOWED_ORIGIN=*
+              GOOGLE_PLACES_KEY=
+              EOF
+
+              cd /opt/sitelens/backend-py
+              docker build -t sitelens-api .
+              docker rm -f sitelens-api 2>/dev/null || true
+              docker run -d --restart always --name sitelens-api -p 80:8000 --env-file /opt/sitelens/backend.env sitelens-api
+            - DbHost: !ImportValue 'sitelens-DbEndpoint'
+              DbNameV: !ImportValue 'sitelens-DbName'
+
+Outputs:
+  InstanceId:
+    Value: !Ref AppInstance
+  PublicIp:
+    Value: !GetAtt AppInstance.PublicIp
+  PublicDns:
+    Value: !GetAtt AppInstance.PublicDnsName
+    Description: Hit http://<this> to reach the API (once data is loaded).

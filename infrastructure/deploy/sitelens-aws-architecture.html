@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SiteLens - AWS Deployment Tracker</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body{ font-family:"Segoe UI",Arial,sans-serif; background:#0f1115; color:#e8eaed;
+    max-width:1080px; margin:0 auto; padding:24px; line-height:1.45; }
+  h1{ font-size:19pt; }
+  .sub{ color:#9aa0aa; font-size:10pt; margin:2px 0 14px; }
+  .tabs{ display:flex; gap:8px; margin:8px 0 4px; flex-wrap:wrap; }
+  .tabs button{ font:inherit; font-size:12.5pt; font-weight:700; padding:8px 16px; border:1px solid #262c38;
+    background:#161a22; color:#c9cdd4; border-radius:8px 8px 0 0; cursor:pointer; }
+  .tabs button.on{ background:#22c1a5; color:#0f1115; border-color:#22c1a5; }
+  .pane{ display:none; border-top:2px solid #22c1a5; padding-top:12px; }
+  .pane.active{ display:block; }
+
+  .band{ border:1px solid #262c38; border-radius:10px; padding:11px 13px; margin:0 0 6px; background:#141821; }
+  .band.later{ border-style:dashed; opacity:.85; }
+  .band > .label{ font-size:8.5pt; text-transform:uppercase; letter-spacing:.5px; color:#9aa0aa; font-weight:700; margin-bottom:8px; }
+  .row{ display:flex; gap:10px; flex-wrap:wrap; }
+  .box{ flex:1 1 0; min-width:150px; background:#1b2130; border:1px solid #2c3444; border-radius:8px; padding:9px 11px; }
+  .box.later{ border-style:dashed; background:#181426; }
+  .box b{ display:block; font-size:10pt; margin-bottom:3px; color:#fff; }
+  .box small{ color:#9aa0aa; font-size:8.5pt; line-height:1.35; display:block; }
+  .box .t{ display:inline-block; background:#0f1420; border:1px solid #2c3444; color:#b9c2d0; border-radius:4px; padding:0 5px; font-size:8pt; margin:3px 3px 0 0; }
+  .arrow{ text-align:center; color:#5b6472; font-size:14pt; margin:1px 0; line-height:1; }
+  .arrow small{ display:block; font-size:8pt; color:#7a8494; }
+  .fe{ border-left:3px solid #3b82f6; } .cf{ border-left:3px solid #22c1a5; } .cmp{ border-left:3px solid #f59e0b; }
+  .data{ border-left:3px solid #ef5da8; } .net{ border-left:3px solid #64748b; } .ops{ border-left:3px solid #a855f7; }
+
+  h2{ font-size:12.5pt; margin:20px 0 6px; border-bottom:1px solid #262c38; padding-bottom:4px; }
+  h2:first-child{ margin-top:4px; }
+  ol,ul{ margin-left:20px; font-size:10pt; } li{ margin:4px 0; }
+  code{ background:#1b2130; padding:1px 5px; border-radius:4px; font-size:9pt; color:#cfe3ff; }
+  .optbox{ background:#10241c; border:1px solid #1d5c48; border-radius:8px; padding:12px 14px; margin:10px 0; font-size:9.5pt; }
+  .warn{ color:#ffc857; }
+  table{ border-collapse:collapse; width:100%; font-size:9.5pt; margin:6px 0; }
+  th,td{ text-align:left; padding:7px 9px; border-bottom:1px solid #232833; vertical-align:top; }
+  th{ color:#9aa0aa; font-size:8.5pt; text-transform:uppercase; background:#161a22; }
+  .g{ color:#3ddc84; font-weight:700; } .y{ color:#ffc857; font-weight:700; }
+  /* checklist */
+  .chk{ list-style:none; margin:6px 0 6px 2px; }
+  .chk li{ margin:5px 0; padding-left:2px; }
+  .chk label{ cursor:pointer; display:flex; gap:9px; align-items:flex-start; }
+  .chk input{ margin-top:3px; width:15px; height:15px; accent-color:#22c1a5; flex:none; }
+  .chk input:checked + span{ color:#6b7280; text-decoration:line-through; }
+  .grp{ font-weight:700; color:#fff; margin:14px 0 4px; font-size:10.5pt; }
+  .now{ background:#161a22; border:1px solid #22c1a5; border-radius:8px; padding:12px 14px; margin:10px 0; }
+  .kpi{ display:flex; gap:10px; flex-wrap:wrap; margin:10px 0; }
+  .kpi div{ background:#161a22; border:1px solid #262c38; border-radius:8px; padding:10px 14px; }
+  .kpi b{ font-size:18pt; display:block; color:#fff; }
+  .muted{ color:#9aa0aa; font-size:9pt; }
+</style>
+</head>
+<body>
+  <h1>SiteLens - AWS Deployment Tracker</h1>
+  <div class="sub">FastAPI + React + PostGIS &middot; new free-tier account &middot; ap-south-1 &middot; lean start (CloudFront, GitHub build, no ECR)</div>
+
+  <div class="tabs">
+    <button class="on" onclick="tab('arch',this)">Architecture</button>
+    <button onclick="tab('next',this)">What's Next</button>
+    <button onclick="tab('todo',this)">To-Do</button>
+    <button onclick="tab('cost',this)">Pricing</button>
+  </div>
+
+  <!-- ============ ARCHITECTURE ============ -->
+  <div id="arch" class="pane active">
+    <div class="band"><div class="label">Users</div>
+      <div class="row"><div class="box fe"><b>Customers (browser)</b><small>Load app, run spatial analyses, view maps</small></div></div></div>
+    <div class="arrow">&#9660;<small>HTTPS</small></div>
+    <div class="band"><div class="label">Edge / Delivery</div>
+      <div class="row">
+        <div class="box cf"><b>CloudFront (CDN)</b><small>Free HTTPS URL, caches static + <b>vector tiles</b> - makes 12M points fast</small><span class="t">TLS</span><span class="t">tile cache</span></div>
+        <div class="box fe"><b>S3 (static)</b><small>React build - CloudFront origin</small></div>
+      </div></div>
+    <div class="arrow">&#9660;<small>/api/*</small></div>
+    <div class="band"><div class="label">Compute - API</div>
+      <div class="row">
+        <div class="box cmp"><b>EC2 t3.micro</b><small><b>Docker: FastAPI</b>. <code>git pull</code> + <code>docker build</code> on the box. Serves REST + <code>ST_AsMVT</code> tiles.</small><span class="t">Phase 1</span><span class="t">Docker</span></div>
+        <div class="box cmp later"><b>ALB + EC2 Auto Scaling</b><small>Phase 2: load balancer + 1&rarr;N instances. ~$16/mo.</small><span class="t">Phase 2</span></div>
+      </div></div>
+    <div class="arrow">&#9660;<small>5432 (private)</small></div>
+    <div class="band"><div class="label">Data</div>
+      <div class="row">
+        <div class="box data"><b>RDS PostgreSQL + PostGIS</b><small><code>db.t3.micro</code>, private. 12M OSM + geocoding, managed backups.</small><span class="t">PostGIS</span></div>
+        <div class="box data"><b>S3 (data)</b><small>GeoParquet / PMTiles / assets</small></div>
+      </div></div>
+    <div class="band"><div class="label">Supporting</div>
+      <div class="row">
+        <div class="box ops"><b>GitHub (source)</b><small>EC2 <code>git pull</code> &rarr; builds Docker (no registry)</small></div>
+        <div class="box ops"><b>CloudWatch</b><small>Logs, metrics, budget/CPU alarms</small></div>
+        <div class="box ops"><b>Secrets Manager / SSM</b><small>DB creds, API keys</small></div>
+        <div class="box ops"><b>IAM</b><small>Admin user + EC2 role</small></div>
+      </div></div>
+    <div class="band"><div class="label">Network (sitelens-network.yaml)</div>
+      <div class="row">
+        <div class="box net"><b>VPC 10.0.0.0/16</b><small>+ Internet Gateway</small></div>
+        <div class="box net"><b>Public subnets x2</b><small>EC2 (+ ALB later)</small></div>
+        <div class="box net"><b>Private subnets x2</b><small>RDS (2 AZs)</small></div>
+        <div class="box net"><b>No NAT Gateway</b><small class="warn">saves ~$32/mo</small></div>
+      </div></div>
+
+    <h2>Request flow</h2>
+    <ol>
+      <li><b>Frontend:</b> user &rarr; CloudFront &rarr; S3 (cached).</li>
+      <li><b>API:</b> user &rarr; CloudFront &rarr; FastAPI on EC2 &rarr; RDS PostGIS &rarr; JSON.</li>
+      <li><b>Tiles (12M pts):</b> FastAPI <code>ST_AsMVT</code> &rarr; CloudFront caches &rarr; map. Raw points never leave the DB.</li>
+      <li><b>Deploy:</b> push to GitHub &rarr; on EC2 <code>git pull</code> &rarr; <code>docker build</code> &rarr; <code>docker run</code>.</li>
+    </ol>
+    <div class="optbox"><b>Optimizations</b><br>
+      - No NAT Gateway (~$32/mo saved) &middot; CloudFront caches tiles &middot; single EC2 now, ALB+ASG later &middot; RDS private &middot; budget alarm day one.<br>
+      - <span class="warn">Watch:</span> <code>db.t3.micro</code> (1 GB RAM) is light for heavy PostGIS - trim data or size up if slow.</div>
+  </div>
+
+  <!-- ============ WHAT'S NEXT ============ -->
+  <div id="next" class="pane">
+    <div class="now"><b>Right now &rarr;</b> Set up the <b>admin user + budget alarm</b>, then deploy <b>Stack 1 (network)</b>. Everything else waits on these.</div>
+    <h2>Decisions locked</h2>
+    <ul>
+      <li>Lean start (single EC2), scale to ALB+ASG later.</li>
+      <li><b>CloudFront</b> for frontend + HTTPS + tile caching (no Caddy/domain needed now).</li>
+      <li><b>No ECR</b> - EC2 pulls from GitHub and builds Docker on the box.</li>
+      <li>Region <code>ap-south-1</code> &middot; budget ~$50/mo (from $300 / 6 mo credits).</li>
+    </ul>
+    <h2>Immediate sequence</h2>
+    <ol>
+      <li>Admin user + MFA + budget alarm (To-Do &rarr; Account).</li>
+      <li>Deploy <code>sitelens-network.yaml</code> (Stack 1).</li>
+      <li>Ping me &rarr; I hand you <b>Stack 2 (RDS)</b> and <b>Stack 3 (EC2 + git-build user-data)</b>.</li>
+    </ol>
+    <h2>Waiting on you</h2>
+    <ul>
+      <li>Is the SiteLens repo <b>public or private</b>? (private &rarr; add a GitHub deploy key on the EC2.)</li>
+      <li>Full 12M OSM load, or a trimmed subset to fit free RDS + t3.micro?</li>
+    </ul>
+  </div>
+
+  <!-- ============ TO-DO ============ -->
+  <div id="todo" class="pane">
+    <p class="muted">Checkboxes save automatically in this browser.</p>
+
+    <div class="grp">1. Account &amp; guardrails (you, console)</div>
+    <ul class="chk">
+      <li><label><input type="checkbox" id="t1"><span>New AWS account created</span></label></li>
+      <li><label><input type="checkbox" id="t2"><span>Root user MFA enabled; stop using root</span></label></li>
+      <li><label><input type="checkbox" id="t3"><span>IAM user <code>sitelens-admin</code> (AdministratorAccess) + access key</span></label></li>
+      <li><label><input type="checkbox" id="t4"><span><code>aws configure</code> done on your machine (region ap-south-1)</span></label></li>
+      <li><label><input type="checkbox" id="t5"><span>Budget alarm set ($40/mo)</span></label></li>
+    </ul>
+
+    <div class="grp">2. Stack 1 - Network</div>
+    <ul class="chk">
+      <li><label><input type="checkbox" id="t6"><span>Deploy <code>sitelens-network.yaml</code> (VPC, subnets, SGs)</span></label></li>
+      <li><label><input type="checkbox" id="t7"><span>Confirm exported outputs (VpcId, subnets, SG ids)</span></label></li>
+    </ul>
+
+    <div class="grp">3. Stack 2 - Database</div>
+    <ul class="chk">
+      <li><label><input type="checkbox" id="t8"><span>Deploy RDS PostgreSQL + PostGIS (private subnets)</span></label></li>
+      <li><label><input type="checkbox" id="t9"><span>Enable PostGIS extension</span></label></li>
+      <li><label><input type="checkbox" id="t10"><span>Load OSM data (osm2pgsql) + geocoding index</span></label></li>
+      <li><label><input type="checkbox" id="t11"><span>Create indexes (GiST); smoke-test a spatial query</span></label></li>
+    </ul>
+
+    <div class="grp">4. Stack 3 - App (EC2)</div>
+    <ul class="chk">
+      <li><label><input type="checkbox" id="t12"><span>Deploy EC2 t3.micro + IAM role (public subnet)</span></label></li>
+      <li><label><input type="checkbox" id="t13"><span>GitHub deploy key on EC2 (if repo private)</span></label></li>
+      <li><label><input type="checkbox" id="t14"><span>user-data: install Docker+git, <code>git clone</code>, <code>docker build</code>, <code>docker run</code></span></label></li>
+      <li><label><input type="checkbox" id="t15"><span>DB creds via Secrets Manager / SSM; app connects to RDS</span></label></li>
+      <li><label><input type="checkbox" id="t16"><span><code>/health</code> returns ok from the EC2</span></label></li>
+    </ul>
+
+    <div class="grp">5. Stack 4 - Frontend + CloudFront</div>
+    <ul class="chk">
+      <li><label><input type="checkbox" id="t17"><span>S3 bucket for React build; upload build</span></label></li>
+      <li><label><input type="checkbox" id="t18"><span>CloudFront distribution (S3 origin + /api &rarr; EC2)</span></label></li>
+      <li><label><input type="checkbox" id="t19"><span>Point <code>VITE_API_BASE</code> to the CloudFront URL</span></label></li>
+      <li><label><input type="checkbox" id="t20"><span>End-to-end test: map + tiles + an analysis</span></label></li>
+    </ul>
+
+    <div class="grp">6. Phase 2 - Scale (later)</div>
+    <ul class="chk">
+      <li><label><input type="checkbox" id="t21"><span>Add ALB + EC2 Auto Scaling Group</span></label></li>
+      <li><label><input type="checkbox" id="t22"><span>CI/CD (GitHub Actions) + move image to ECR</span></label></li>
+      <li><label><input type="checkbox" id="t23"><span>Redis/ElastiCache cache; CloudWatch alarms</span></label></li>
+    </ul>
+  </div>
+
+  <!-- ============ PRICING ============ -->
+  <div id="cost" class="pane">
+    <div class="kpi">
+      <div><b>$300</b> credits (6 mo)</div>
+      <div><b>~$50</b> /mo ceiling</div>
+      <div><b>~$0-5</b> /mo Phase 1 (in free tier)</div>
+      <div><b>~$35</b> /mo Phase 2 est.</div>
+    </div>
+
+    <h2>Per-service cost (ap-south-1, approx)</h2>
+    <table>
+      <tr><th>Service</th><th>Free tier (12 mo)</th><th>After free / Phase 2</th><th>Note</th></tr>
+      <tr><td>EC2 t3.micro</td><td class="g">750 h/mo free</td><td>~$8/mo</td><td>1 instance 24/7 = free</td></tr>
+      <tr><td>RDS db.t3.micro</td><td class="g">750 h + 20 GB free</td><td>~$12/mo + storage</td><td>watch 20 GB / 1 GB RAM</td></tr>
+      <tr><td>EBS (EC2 disk)</td><td class="g">30 GB free</td><td>$0.10/GB/mo</td><td></td></tr>
+      <tr><td>S3</td><td class="g">5 GB free</td><td>$0.025/GB/mo</td><td>tiles/parquet/build</td></tr>
+      <tr><td>CloudFront</td><td class="g">1 TB out + 10M req free</td><td>$0.11/GB after</td><td>low traffic = free</td></tr>
+      <tr><td>Data transfer out</td><td class="g">100 GB/mo free</td><td>~$0.09/GB</td><td></td></tr>
+      <tr><td>Secrets Manager</td><td>-</td><td>$0.40/secret/mo</td><td>or SSM Param = free</td></tr>
+      <tr><td>Elastic IP</td><td class="g">free (attached)</td><td>$3.6/mo if unused</td><td>keep attached</td></tr>
+      <tr><td class="y">ALB (Phase 2)</td><td>-</td><td class="y">~$16-18/mo</td><td>only when scaling</td></tr>
+      <tr><td class="y">NAT Gateway</td><td>-</td><td class="y">~$32/mo</td><td><b>avoided by design</b></td></tr>
+    </table>
+
+    <h2>Running estimate</h2>
+    <ul>
+      <li><b>Phase 1 (now):</b> EC2 + RDS + S3 + CloudFront all within free tier &rarr; <b>~$0-5/mo</b> (small overage risk on storage/transfer).</li>
+      <li><b>After 12-mo free tier OR Phase 2:</b> EC2 ~$8 + RDS ~$12 + ALB ~$16 &rarr; <b>~$35-40/mo</b>.</li>
+      <li><b>$300 credits</b> comfortably cover 6 months at either phase.</li>
+    </ul>
+
+    <h2>Actual spend log (fill monthly)</h2>
+    <table>
+      <tr><th>Month</th><th>Est.</th><th>Actual (Billing console)</th><th>Notes</th></tr>
+      <tr><td>Month 1</td><td>~$0-5</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+      <tr><td>Month 2</td><td>~$0-5</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+      <tr><td>Month 3</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+    </table>
+    <p class="muted">Check real numbers in AWS Billing &rarr; Cost Explorer. Set the budget alarm so you're emailed at 80% of $40.</p>
+  </div>
+
+  <script>
+    function tab(id, btn){
+      document.querySelectorAll('.pane').forEach(function(p){ p.classList.remove('active'); });
+      document.getElementById(id).classList.add('active');
+      document.querySelectorAll('.tabs button').forEach(function(b){ b.classList.remove('on'); });
+      btn.classList.add('on');
+    }
+    // persist checkboxes
+    document.querySelectorAll('.chk input[type=checkbox]').forEach(function(c){
+      var k = 'sitelens-aws-' + c.id;
+      c.checked = localStorage.getItem(k) === '1';
+      c.addEventListener('change', function(){ localStorage.setItem(k, c.checked ? '1' : '0'); });
+    });
+  </script>
+</body>
+</html>

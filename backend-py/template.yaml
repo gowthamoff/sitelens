@@ -1,0 +1,103 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  SiteLens backend — a single Python Lambda (FastAPI + Mangum) behind an
+  API Gateway HTTP API. Replaces the old EC2 + Express + ALB + Martin + Redis stack.
+
+Parameters:
+  RdsHost:
+    Type: String
+    Description: Endpoint of the PostGIS RDS instance (from the rds-postgis stack output).
+  RdsPort:
+    Type: String
+    Default: "5432"
+  RdsDb:
+    Type: String
+    Description: Database name (must match what osm2pgsql loaded into).
+  RdsUser:
+    Type: String
+    Default: postgres
+  RdsPass:
+    Type: String
+    NoEcho: true
+    Description: Database password.
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: 'Secret used to sign JWT access tokens. Generate: python -c "import secrets;print(secrets.token_hex(48))"'
+  JwtExpiresIn:
+    Type: String
+    Default: "7d"
+  GooglePlacesKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: '(Optional) Google Places API (New) key for Competitor enrichment. Blank = OSM-only.'
+  AllowedOrigin:
+    Type: String
+    Default: "*"
+    Description: CORS allowed origin (set to your CloudFront/Amplify domain in production).
+
+Globals:
+  Function:
+    Runtime: python3.12
+    # x86_64 + `sam build --use-container` produces correct manylinux wheels for
+    # psycopg[binary] and bcrypt. (Switch to arm64 only if you also build on arm.)
+    Architectures:
+      - x86_64
+    Timeout: 30
+    MemorySize: 1024
+
+Resources:
+  SiteLensHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: prod
+      # NOTE: CORS is intentionally handled inside the app (FastAPI CORSMiddleware),
+      # not here, to avoid duplicate Access-Control-* headers. OPTIONS preflight
+      # falls through to the Lambda, which answers it.
+      DefaultRouteSettings:
+        # Cheap global throttle in place of express-rate-limit (per-IP parity would
+        # need a REST API + usage plans or AWS WAF — see README).
+        ThrottlingBurstLimit: 50
+        ThrottlingRateLimit: 100
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: sitelens-api
+      CodeUri: .
+      Handler: app.main.handler
+      Environment:
+        Variables:
+          RDS_HOST: !Ref RdsHost
+          RDS_PORT: !Ref RdsPort
+          RDS_DB: !Ref RdsDb
+          RDS_USER: !Ref RdsUser
+          RDS_PASS: !Ref RdsPass
+          JWT_SECRET: !Ref JwtSecret
+          JWT_EXPIRES_IN: !Ref JwtExpiresIn
+          GOOGLE_PLACES_KEY: !Ref GooglePlacesKey
+          ALLOWED_ORIGIN: !Ref AllowedOrigin
+          NODE_ENV: production
+      Events:
+        Root:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref SiteLensHttpApi
+            Path: /
+            Method: ANY
+        Proxy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref SiteLensHttpApi
+            Path: /{proxy+}
+            Method: ANY
+
+Outputs:
+  ApiUrl:
+    Description: Base invoke URL — set the client's VITE_API_BASE / VITE_TILE_BASE to this.
+    Value: !Sub "https://${SiteLensHttpApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+  FunctionName:
+    Value: !Ref ApiFunction

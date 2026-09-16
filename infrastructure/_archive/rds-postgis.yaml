@@ -1,0 +1,94 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  SiteLens database — a publicly accessible PostgreSQL + PostGIS instance for the
+  Lambda backend. Free-tier friendly (db.t4g.micro, 20 GB). The Lambda runs OUTSIDE
+  any VPC, so the DB is reachable over the internet but locked down by a security
+  group + TLS + strong credentials. Tighten later by moving the DB private and the
+  Lambda into the VPC with RDS Proxy (note: that path needs a paid NAT Gateway for
+  the function's Google Places egress).
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to place the DB in (the account's default VPC is fine).
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Two+ subnets in different AZs for the DB subnet group (public subnets of the default VPC).
+  DbName:
+    Type: String
+    Default: osm_tn
+    Description: Initial database name (osm2pgsql will load planet_osm_* into this).
+  DbUser:
+    Type: String
+    Default: postgres
+  DbPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    Description: Master password.
+  AdminCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: >
+      CIDR allowed to reach 5432. Lambda has dynamic egress IPs so it cannot be
+      pinned here; 0.0.0.0/0 (default) relies on TLS + credentials. For tighter
+      admin access set this to YOUR.IP/32 and add a second rule for ops.
+  EngineVersion:
+    Type: String
+    Default: "16.4"
+
+Resources:
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: SiteLens PostGIS subnet group
+      SubnetIds: !Ref SubnetIds
+
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SiteLens DB — allow Postgres 5432
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: !Ref AdminCidr
+          Description: Postgres access (TLS-protected; lock down via AdminCidr)
+      Tags:
+        - Key: Name
+          Value: sitelens-db-sg
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: sitelens-postgis
+      Engine: postgres
+      EngineVersion: !Ref EngineVersion
+      DBInstanceClass: db.t4g.micro      # Free-tier eligible (12 months)
+      AllocatedStorage: "20"
+      StorageType: gp3
+      DBName: !Ref DbName
+      MasterUsername: !Ref DbUser
+      MasterUserPassword: !Ref DbPassword
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DbSecurityGroup
+      PubliclyAccessible: true
+      MultiAZ: false
+      StorageEncrypted: true
+      BackupRetentionPeriod: 7
+      Tags:
+        - Key: Name
+          Value: sitelens-postgis
+
+Outputs:
+  DbEndpoint:
+    Description: Use as RdsHost in the SAM deploy.
+    Value: !GetAtt Database.Endpoint.Address
+  DbPort:
+    Value: !GetAtt Database.Endpoint.Port
+  DbSecurityGroupId:
+    Value: !Ref DbSecurityGroup

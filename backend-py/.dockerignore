@@ -1,0 +1,11 @@
+.aws-sam/
+env.json
+env.example.json
+__pycache__/
+**/__pycache__/
+*.pyc
+.python-version
+README.md
+DB-SETUP.md
+samconfig.toml
+deploy.ps1

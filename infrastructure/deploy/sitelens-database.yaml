@@ -1,0 +1,75 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  SiteLens Stack 2 - RDS PostgreSQL (PostGIS-capable), free-tier friendly.
+  db.t4g.micro, 20 GB, PRIVATE (not internet-facing) - reachable only from the app
+  security group on 5432. Imports VPC/private-subnets/DB-SG from the network stack.
+  PostGIS is enabled after creation via: CREATE EXTENSION postgis;
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: sitelens
+  DbName:
+    Type: String
+    Default: osm_tn
+  DbUser:
+    Type: String
+    Default: postgres
+  DbPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    Description: Master password (min 8 chars). Pass via --parameter-overrides; do not commit.
+  DbInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+    Description: Free-tier eligible micro class.
+  AllocatedStorage:
+    Type: Number
+    Default: 20
+    Description: GB (free tier = 20).
+
+Resources:
+
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: SiteLens DB subnet group (private subnets, 2 AZs)
+      SubnetIds: !Split [',', !ImportValue 'sitelens-PrivateSubnetIds']
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Stack, Value: database }
+
+  DbInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub '${ProjectName}-db'
+      Engine: postgres
+      DBName: !Ref DbName
+      MasterUsername: !Ref DbUser
+      MasterUserPassword: !Ref DbPassword
+      DBInstanceClass: !Ref DbInstanceClass
+      AllocatedStorage: !Ref AllocatedStorage
+      StorageType: gp2
+      MultiAZ: false
+      PubliclyAccessible: false
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VPCSecurityGroups:
+        - !ImportValue 'sitelens-DbSecurityGroupId'
+      BackupRetentionPeriod: 1   # free-tier accounts cap retention (7 exceeded the max); 1 day is allowed
+      DeletionProtection: false
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Stack, Value: database }
+
+Outputs:
+  DbEndpoint:
+    Value: !GetAtt DbInstance.Endpoint.Address
+    Export: { Name: !Sub '${ProjectName}-DbEndpoint' }
+  DbPort:
+    Value: !GetAtt DbInstance.Endpoint.Port
+    Export: { Name: !Sub '${ProjectName}-DbPort' }
+  DbName:
+    Value: !Ref DbName
+    Export: { Name: !Sub '${ProjectName}-DbName' }

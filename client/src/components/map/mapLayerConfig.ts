@@ -39,19 +39,25 @@ export const API_TILE_BASE = (apiBase: string) => apiBase || window.location.ori
 export function buildSources(apiBase: string) {
   const base = API_TILE_BASE(apiBase);
   return {
+    // Tiles now served by zoom-tiered Martin function sources (tiles_*):
+    // low zoom → pre-projected 3857 MVs, high zoom → raw tables. Layer names
+    // inside the MVT remain planet_osm_* so 'source-layer' below is unchanged.
+    // See migrations/tile-functions.sql. (Was: /tiles/planet_osm_*/…)
+    // No .pbf extension: Martin function sources serve at /tiles/{src}/{z}/{x}/{y}
+    // (the .pbf suffix triggers a 301 redirect → wasted round-trip per tile).
     osm_points: {
       type: 'vector' as const,
-      tiles: [`${base}/tiles/planet_osm_point/{z}/{x}/{y}.pbf`],
+      tiles: [`${base}/tiles/tiles_point/{z}/{x}/{y}`],
       minzoom: 12, maxzoom: 22,
     },
     osm_lines: {
       type: 'vector' as const,
-      tiles: [`${base}/tiles/planet_osm_line/{z}/{x}/{y}.pbf`],
+      tiles: [`${base}/tiles/tiles_line/{z}/{x}/{y}`],
       minzoom: 10, maxzoom: 22,
     },
     osm_polygons: {
       type: 'vector' as const,
-      tiles: [`${base}/tiles/planet_osm_polygon/{z}/{x}/{y}.pbf`],
+      tiles: [`${base}/tiles/tiles_polygon/{z}/{x}/{y}`],
       minzoom: 4, maxzoom: 22,
     },
   };

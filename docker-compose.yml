@@ -25,9 +25,24 @@ services:
       - RDS_PASS=${RDS_PASS}
       - GOOGLE_PLACES_KEY=${GOOGLE_PLACES_KEY}
       - NDVI_SERVICE_URL=http://ndvi-service:8000
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-7d}
+      - REDIS_URL=redis://redis:6379
     depends_on:
       ndvi-service:
         condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - app-network
+
+  # ── Redis (analysis cache) ──
+  redis:
+    image: redis:7-alpine
+    container_name: site-analysis-redis
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
     networks:
       - app-network
 

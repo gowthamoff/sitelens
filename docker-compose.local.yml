@@ -1,0 +1,92 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SiteLens — fully local stack (no AWS, no billing).
+#   postgis     PostGIS 16 database (data persisted in a named volume)
+#   osm-loader  one-shot: osm2pgsql import + migrations, then exits
+#   backend     the Python FastAPI app (backend-py) on http://localhost:8080
+#   client      the React/Vite dev server on http://localhost:5173  (optional)
+#
+# Usage:
+#   1) put a Geofabrik extract at ./data/region.osm.pbf  (see data/README.md)
+#   2) docker compose -f docker-compose.local.yml up --build
+#   3) wait for osm-loader to finish, then open http://localhost:5173
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+  postgis:
+    image: postgis/postgis:16-3.4
+    container_name: sitelens-postgis
+    environment:
+      POSTGRES_DB: osm_tn
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgis-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5433:5432"   # host 5433 (5432 is used by another project's postgis); internal stays 5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d osm_tn"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  osm-loader:
+    build:
+      context: ./scripts/local
+      dockerfile: Dockerfile.loader
+    container_name: sitelens-osm-loader
+    depends_on:
+      postgis:
+        condition: service_healthy
+    environment:
+      PGHOST: postgis
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: osm_tn
+      PBF: /data/region.osm.pbf
+    volumes:
+      - ./data:/data:ro
+      - ./migrations:/sql:ro
+    restart: "no"
+
+  backend:
+    build:
+      context: ./backend-py
+    container_name: sitelens-backend
+    depends_on:
+      postgis:
+        condition: service_healthy
+    environment:
+      RDS_HOST: postgis
+      RDS_PORT: "5432"
+      RDS_DB: osm_tn
+      RDS_USER: postgres
+      RDS_PASS: postgres
+      RDS_SSLMODE: disable          # local Postgres has no TLS
+      JWT_SECRET: local-dev-secret-change-me-1234567890
+      JWT_EXPIRES_IN: 7d
+      GOOGLE_PLACES_KEY: ""         # optional — set to enable competitor enrichment
+      ALLOWED_ORIGIN: "*"
+      NODE_ENV: development
+    ports:
+      - "8080:8080"
+
+  # Optional: the frontend. Comment this out if you run the client yourself.
+  client:
+    image: node:20-alpine
+    container_name: sitelens-client
+    working_dir: /app
+    depends_on:
+      - backend
+    environment:
+      VITE_API_BASE: "http://localhost:8080"
+      VITE_TILE_BASE: "http://localhost:8080"
+    volumes:
+      - ./client:/app
+      - client_node_modules:/app/node_modules   # keep container deps off the host
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5175"
+    ports:
+      - "5175:5175"
+
+volumes:
+  pgdata:
+  client_node_modules:

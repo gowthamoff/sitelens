@@ -1,0 +1,13 @@
+# One-shot container that loads an OSM extract into the local PostGIS and applies
+# the SiteLens migrations. Exits when done. Re-running is safe (it skips osm2pgsql
+# if planet_osm_point already exists).
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends osm2pgsql postgresql-client ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY load-osm.sh /load-osm.sh
+RUN chmod +x /load-osm.sh
+
+ENTRYPOINT ["/load-osm.sh"]

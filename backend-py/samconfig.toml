@@ -1,0 +1,16 @@
+# SAM CLI config. Secrets are NOT stored here — they're passed at deploy time via
+# deploy.ps1 (which reads them from environment variables). `sam deploy --guided`
+# will append a richer version of this on first run.
+version = 0.1
+
+[default.global.parameters]
+stack_name = "sitelens-backend"
+
+[default.build.parameters]
+use_container = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = false
+resolve_s3 = true
+region = "ap-south-1"
