@@ -275,8 +275,8 @@ export function MapContainer() {
           ...initialMartinLayers as any
         ],
       },
-      center: [77.59, 12.97],
-      zoom: 12,
+      center: [80.2270, 13.0350],
+      zoom: 11,
       attributionControl: false,
     });
 
@@ -291,6 +291,43 @@ export function MapContainer() {
       const raw = getComputedStyle(document.documentElement).getPropertyValue('--panel-h').trim();
       const panelH = parseFloat(raw) || 0;
       if (panelH > 0) map.setPadding({ top: 0, bottom: panelH, left: 0, right: 0 });
+
+      // Analysis coverage boundary — OSM data only exists inside this Chennai extract box.
+      const COVERAGE = { w: 80.08, s: 12.85, e: 80.32, n: 13.18 };
+      const coverageFeature = {
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[
+            [COVERAGE.w, COVERAGE.s],
+            [COVERAGE.e, COVERAGE.s],
+            [COVERAGE.e, COVERAGE.n],
+            [COVERAGE.w, COVERAGE.n],
+            [COVERAGE.w, COVERAGE.s],
+          ]],
+        },
+      } as any;
+      if (!map.getSource('analysis-coverage')) {
+        map.addSource('analysis-coverage', { type: 'geojson', data: coverageFeature });
+        map.addLayer({
+          id: 'analysis-coverage-fill',
+          type: 'fill',
+          source: 'analysis-coverage',
+          paint: { 'fill-color': '#4f9cf9', 'fill-opacity': 0.04 },
+        });
+        map.addLayer({
+          id: 'analysis-coverage-line',
+          type: 'line',
+          source: 'analysis-coverage',
+          paint: {
+            'line-color': '#4f9cf9',
+            'line-width': 1.5,
+            'line-dasharray': [3, 2],
+            'line-opacity': 0.55,
+          },
+        });
+      }
     });
 
     // Fallback: if a layer references a pin that somehow isn't loaded yet, add it now.

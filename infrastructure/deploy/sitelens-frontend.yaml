@@ -1,0 +1,103 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  SiteLens Stack 4 - Frontend delivery. Private S3 bucket for the React build +
+  a CloudFront distribution that: serves the SPA (default), routes /api/* to the
+  EC2 (so the API is HTTPS via CloudFront - no mixed content), gives a free
+  *.cloudfront.net HTTPS URL, and handles SPA routing (403/404 -> index.html).
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: sitelens
+  ApiOriginDomain:
+    Type: String
+    Description: EC2 public DNS from Stack 3 output (e.g. ec2-1-2-3-4.ap-south-1.compute.amazonaws.com)
+
+Resources:
+
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-frontend-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Stack, Value: frontend }
+
+  OAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${ProjectName}-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Stack, Value: frontend }
+      DistributionConfig:
+        Enabled: true
+        Comment: SiteLens frontend + API
+        DefaultRootObject: index.html
+        PriceClass: PriceClass_200   # includes Asia/India edges, cheaper than All
+        Origins:
+          - Id: s3-frontend
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !Ref OAC
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+          - Id: ec2-api
+            DomainName: !Ref ApiOriginDomain
+            CustomOriginConfig:
+              HTTPPort: 80
+              OriginProtocolPolicy: http-only   # CloudFront->EC2 over HTTP; viewer->CloudFront stays HTTPS
+        DefaultCacheBehavior:
+          TargetOriginId: s3-frontend
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6   # Managed-CachingOptimized
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: ec2-api
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad   # Managed-CachingDisabled
+            OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3  # Managed-AllViewer
+        CustomErrorResponses:
+          - { ErrorCode: 403, ResponseCode: 200, ResponsePagePath: /index.html }
+          - { ErrorCode: 404, ResponseCode: 200, ResponsePagePath: /index.html }
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+
+Outputs:
+  CloudFrontURL:
+    Value: !Sub 'https://${Distribution.DomainName}'
+    Description: Your app URL (HTTPS).
+  DistributionId:
+    Value: !Ref Distribution
+  BucketName:
+    Value: !Ref FrontendBucket

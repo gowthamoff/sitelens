@@ -71,6 +71,12 @@ Resources:
       SubnetId: !Select [0, !Split [',', !ImportValue 'sitelens-PublicSubnetIds']]
       SecurityGroupIds:
         - !ImportValue 'sitelens-AppSecurityGroupId'
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda          # root volume - 30 GB (free tier) for the OSM import
+          Ebs:
+            VolumeSize: 30
+            VolumeType: gp3
+            DeleteOnTermination: true
       Tags:
         - { Key: Name, Value: !Sub '${ProjectName}-app' }
         - { Key: Project, Value: !Ref ProjectName }
@@ -105,7 +111,7 @@ Resources:
               cd /opt/sitelens/backend-py
               docker build -t sitelens-api .
               docker rm -f sitelens-api 2>/dev/null || true
-              docker run -d --restart always --name sitelens-api -p 80:8000 --env-file /opt/sitelens/backend.env sitelens-api
+              docker run -d --restart always --name sitelens-api -p 80:8080 --env-file /opt/sitelens/backend.env sitelens-api
             - DbHost: !ImportValue 'sitelens-DbEndpoint'
               DbNameV: !ImportValue 'sitelens-DbName'
 

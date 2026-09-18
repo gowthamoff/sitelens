@@ -22,8 +22,8 @@ Parameters:
     Description: Master password (min 8 chars). Pass via --parameter-overrides; do not commit.
   DbInstanceClass:
     Type: String
-    Default: db.t4g.micro
-    Description: Free-tier eligible micro class.
+    Default: db.t3.micro
+    Description: Free-tier eligible micro class (db.t3.micro x86 / db.t4g.micro ARM / db.t2.micro). t3.micro chosen for better capacity availability.
   AllocatedStorage:
     Type: Number
     Default: 20

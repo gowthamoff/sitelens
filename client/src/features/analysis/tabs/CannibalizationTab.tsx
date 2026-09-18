@@ -123,8 +123,8 @@ function downloadTemplate() {
   const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: 'outlets-template.csv' });
   a.click(); URL.revokeObjectURL(a.href);
 }
-function downloadBangaloreSample() {
-  Object.assign(document.createElement('a'), { href: '/sample-outlets-bangalore.csv', download: 'sample-outlets-bangalore.csv' }).click();
+function downloadChennaiSample() {
+  Object.assign(document.createElement('a'), { href: '/sample-outlets-chennai.csv', download: 'sample-outlets-chennai.csv' }).click();
 }
 
 /* ─── Outlets Modal ───────────────────────────────────────────── */
@@ -179,11 +179,11 @@ function OutletsModal({
             border: '1px solid var(--border)', borderRadius: '8px', padding: '7px 11px',
             cursor: 'pointer', fontSize: '11px', color: 'var(--text-dim)',
           }}><FileText size={12} /> Template</button>
-          <button onClick={downloadBangaloreSample} style={{
+          <button onClick={downloadChennaiSample} style={{
             display: 'flex', alignItems: 'center', gap: '5px', background: 'none',
             border: '1px solid rgba(255,166,87,0.3)', borderRadius: '8px', padding: '7px 11px',
             cursor: 'pointer', fontSize: '11px', color: '#ffa657',
-          }}><FileText size={12} /> Bangalore sample</button>
+          }}><FileText size={12} /> Chennai sample</button>
         </div>
 
         {/* Outlet list / empty state */}
@@ -227,7 +227,7 @@ function OutletsModal({
                 {
                   icon: <FileText size={13} />,
                   title: 'Use sample data',
-                  desc: '22 Bangalore tea chain outlets — click "Bangalore sample" above',
+                  desc: '22 Chennai tea chain outlets — click "Chennai sample" above',
                   color: '#ffa657',
                 },
               ].map(step => (

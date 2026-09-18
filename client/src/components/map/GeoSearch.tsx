@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, MapPin, X, Navigation, Building2, Route } from 'lucide-react';
-import { API_BASE } from '../../config/constants';
 
 interface GeoResult {
   name: string;
@@ -67,31 +66,16 @@ export function GeoSearch({ onSelect, isMobile }: GeoSearchProps) {
 
     const encodedQuery = encodeURIComponent(debouncedQuery.trim());
 
-    Promise.allSettled([
-      // 1. Old Local Geocoding Logic
-      fetch(`${API_BASE}/api/v1/geocode?q=${encodedQuery}&limit=4`).then(r => {
-        if (!r.ok) throw new Error('Local search failed');
-        return r.json();
-      }),
-      // 2. OpenStreetMap Nominatim Online API (requesting GeoJSON boundaries)
-      fetch(`https://nominatim.openstreetmap.org/search?q=${encodedQuery}&format=json&limit=4&polygon_geojson=1`).then(r => {
+    // OpenStreetMap Nominatim online geocoding (with GeoJSON boundaries)
+    fetch(`https://nominatim.openstreetmap.org/search?q=${encodedQuery}&format=json&limit=8&polygon_geojson=1`)
+      .then(r => {
         if (!r.ok) throw new Error('Nominatim search failed');
         return r.json();
       })
-    ])
-    .then(([localRes, nomRes]) => {
-      if (cancelled) return;
-      
-      let combined: GeoResult[] = [];
+      .then((nomRes) => {
+        if (cancelled) return;
 
-      // Process Local Results
-      if (localRes.status === 'fulfilled' && Array.isArray(localRes.value)) {
-        combined = [...localRes.value];
-      }
-
-      // Process Nominatim Results
-      if (nomRes.status === 'fulfilled' && Array.isArray(nomRes.value)) {
-        const mappedNom = nomRes.value.map((item: any) => {
+        const mapped: GeoResult[] = (Array.isArray(nomRes) ? nomRes : []).map((item: any) => {
           let category: 'poi' | 'area' | 'road' = 'poi';
           if (item.class === 'highway') category = 'road';
           if (item.class === 'boundary' || item.class === 'building') category = 'area';
@@ -105,28 +89,19 @@ export function GeoSearch({ onSelect, isMobile }: GeoSearchProps) {
             geojson: item.geojson
           };
         });
-        
-        // Add nominatim results, but avoid exact coordinate duplicates
-        mappedNom.forEach((nm: GeoResult) => {
-          const isDup = combined.some(loc => 
-            Math.abs(loc.lat - nm.lat) < 0.001 && Math.abs(loc.lng - nm.lng) < 0.001
-          );
-          if (!isDup) combined.push(nm);
-        });
-      }
 
-      if (combined.length === 0) {
-        setError('No places found');
-      } else {
-        setResults(combined.slice(0, 8)); // keep top 8 total
-      }
-    })
-    .catch(() => {
-      if (!cancelled) setError('Search services unreachable');
-    })
-    .finally(() => {
-      if (!cancelled) setLoading(false);
-    });
+        if (mapped.length === 0) {
+          setError('No places found');
+        } else {
+          setResults(mapped.slice(0, 8));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setError('Search services unreachable');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
 
     return () => { cancelled = true; };
   }, [debouncedQuery]);
