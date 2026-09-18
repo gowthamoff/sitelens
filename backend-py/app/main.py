@@ -92,5 +92,31 @@ app.include_router(h3.router)
 app.include_router(tiles.router)
 
 
+# ── Serve the compiled React SPA from the same origin (single-origin EC2 deploy) ──
+# The Docker build drops the Vite `dist/` output into app/static. When present,
+# mount hashed assets and add a catch-all that returns index.html for client-side
+# routes. API routers (/api/*, /tiles/*, /health) are registered above and match
+# first, so this only catches genuine front-end paths.
+import os
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(_STATIC_DIR):
+    _assets_dir = os.path.join(_STATIC_DIR, "assets")
+    if os.path.isdir(_assets_dir):
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def _serve_spa(full_path: str):
+        # Unknown API paths should 404 as JSON, not fall back to the SPA shell.
+        if full_path.startswith(("api", "tiles", "health")):
+            return SafeJSONResponse(status_code=404, content={"success": False, "error": "Not found"})
+        candidate = os.path.join(_STATIC_DIR, full_path)
+        if full_path and os.path.isfile(candidate):
+            return FileResponse(candidate)
+        return FileResponse(os.path.join(_STATIC_DIR, "index.html"))
+
+
 # AWS Lambda entry point (referenced by template.yaml Handler: app.main.handler).
 handler = Mangum(app, lifespan="off")

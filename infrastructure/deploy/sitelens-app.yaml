@@ -108,7 +108,7 @@ Resources:
               GOOGLE_PLACES_KEY=
               EOF
 
-              cd /opt/sitelens/backend-py
+              cd /opt/sitelens
               docker build -t sitelens-api .
               docker rm -f sitelens-api 2>/dev/null || true
               docker run -d --restart always --name sitelens-api -p 80:8080 --env-file /opt/sitelens/backend.env sitelens-api

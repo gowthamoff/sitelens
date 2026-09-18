@@ -292,7 +292,8 @@ export function MapContainer() {
       const panelH = parseFloat(raw) || 0;
       if (panelH > 0) map.setPadding({ top: 0, bottom: panelH, left: 0, right: 0 });
 
-      // Analysis coverage boundary — OSM data only exists inside this Chennai extract box.
+      // ── Available-data boundary (Chennai OSM extract) ─────────────
+      // Highlighted box marking where analysis actually has data; outside it, queries return empty.
       const COVERAGE = { w: 80.08, s: 12.85, e: 80.32, n: 13.18 };
       const coverageFeature = {
         type: 'Feature',
@@ -310,21 +311,32 @@ export function MapContainer() {
       } as any;
       if (!map.getSource('analysis-coverage')) {
         map.addSource('analysis-coverage', { type: 'geojson', data: coverageFeature });
+        // subtle wash inside the available area
         map.addLayer({
           id: 'analysis-coverage-fill',
           type: 'fill',
           source: 'analysis-coverage',
-          paint: { 'fill-color': '#4f9cf9', 'fill-opacity': 0.04 },
+          paint: { 'fill-color': '#ffa657', 'fill-opacity': 0.06 },
         });
+        // soft glow under the outline so the box reads as a highlight
+        map.addLayer({
+          id: 'analysis-coverage-glow',
+          type: 'line',
+          source: 'analysis-coverage',
+          layout: { 'line-join': 'round' },
+          paint: { 'line-color': '#ffa657', 'line-width': 7, 'line-opacity': 0.18, 'line-blur': 4 },
+        });
+        // bright dashed outline on top
         map.addLayer({
           id: 'analysis-coverage-line',
           type: 'line',
           source: 'analysis-coverage',
+          layout: { 'line-join': 'round' },
           paint: {
-            'line-color': '#4f9cf9',
-            'line-width': 1.5,
-            'line-dasharray': [3, 2],
-            'line-opacity': 0.55,
+            'line-color': '#ffa657',
+            'line-width': 2.5,
+            'line-dasharray': [2, 1.5],
+            'line-opacity': 0.95,
           },
         });
       }
