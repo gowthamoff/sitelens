@@ -1,0 +1,15 @@
+# Reverse-proxy every request to the EC2 origin (full SiteLens app: SPA + /api/* + /tiles/*).
+# Only ${PORT} is substituted at startup (set by Render); no nginx $variables are
+# used here on purpose, so envsubst can't clobber them.
+server {
+    listen ${PORT};
+
+    # Large uploads / long spatial queries shouldn't be cut short.
+    client_max_body_size 25m;
+    proxy_read_timeout 120s;
+
+    location / {
+        proxy_pass http://13.126.191.50:80;
+        proxy_http_version 1.1;
+    }
+}
