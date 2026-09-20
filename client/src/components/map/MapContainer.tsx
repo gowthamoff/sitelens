@@ -11,7 +11,7 @@ import { Target, Pencil, Trash2, Zap, Loader2, Minus, Plus, Layers, Compass } fr
 import { GeoSearch } from './GeoSearch';
 import { buildSources, MAP_LAYERS } from './mapLayerConfig';
 
-type MapMode = 'martin' | 'satellite' | 'osm';
+type MapMode = 'martin' | 'satellite' | 'hybrid' | 'osm';
 
 // SVG pin definitions — keyed so they can be registered eagerly on map load
 const PIN_SVGS: Record<string, string> = {
@@ -254,6 +254,16 @@ export function MapContainer() {
             type: 'raster',
             tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
             attribution: 'Esri World Imagery', tileSize: 256,
+          },
+          'google-hybrid': {
+            type: 'raster',
+            tiles: [
+              'https://mt0.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+              'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+              'https://mt2.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+              'https://mt3.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+            ],
+            attribution: '© Google', tileSize: 256,
           }
         },
         layers: [
@@ -269,6 +279,13 @@ export function MapContainer() {
             id: 'satellite-layer',
             type: 'raster',
             source: 'satellite',
+            layout: { visibility: 'none' },
+            paint: { 'raster-opacity': 1 }
+          },
+          {
+            id: 'google-hybrid-layer',
+            type: 'raster',
+            source: 'google-hybrid',
             layout: { visibility: 'none' },
             paint: { 'raster-opacity': 1 }
           },
@@ -938,7 +955,7 @@ export function MapContainer() {
           1.0, 'rgba(180,30,10,0.9)',
         ];
       }
-      if (mode === 'satellite') {
+      if (mode === 'satellite' || mode === 'hybrid') {
         // Dark aerial — infrared palette, slightly softened
         return [
           'interpolate', ['linear'], ['heatmap-density'],
@@ -1501,13 +1518,17 @@ export function MapContainer() {
 
     const satMode = mode === 'satellite';
     const osmMode = mode === 'osm';
-    const hasRaster = satMode || osmMode;
+    const hybridMode = mode === 'hybrid';
+    const hasRaster = satMode || osmMode || hybridMode;
 
     if (map.getLayer('satellite-layer')) {
       map.setLayoutProperty('satellite-layer', 'visibility', satMode ? 'visible' : 'none');
     }
     if (map.getLayer('osm-layer')) {
       map.setLayoutProperty('osm-layer', 'visibility', osmMode ? 'visible' : 'none');
+    }
+    if (map.getLayer('google-hybrid-layer')) {
+      map.setLayoutProperty('google-hybrid-layer', 'visibility', hybridMode ? 'visible' : 'none');
     }
 
     // In OSM mode, hide EVERY vector layer from Martin to prevent duplication with OSM raster.
@@ -1520,7 +1541,9 @@ export function MapContainer() {
         'natural-fill', 'buildings-fill', 'buildings-outline'
       ].includes(layer.id);
 
-      if (osmMode) {
+      if (osmMode || hybridMode) {
+        // OSM raster and Google Hybrid both carry their own roads/labels — hide
+        // the Martin vector layers so they don't duplicate on top.
         map.setLayoutProperty(layer.id, 'visibility', 'none');
       } else if (satMode) {
         map.setLayoutProperty(layer.id, 'visibility', isBackgroundOrFill ? 'none' : 'visible');
@@ -1885,6 +1908,28 @@ export function MapContainer() {
                   ),
                 },
                 {
+                  id: 'hybrid' as MapMode,
+                  label: 'Hybrid',
+                  preview: (
+                    <svg width="64" height="48" viewBox="0 0 64 48" style={{ borderRadius: '8px', display: 'block' }}>
+                      <defs>
+                        <radialGradient id="hg" cx="50%" cy="50%">
+                          <stop offset="0%" stopColor="#3a5a3a" />
+                          <stop offset="60%" stopColor="#243b24" />
+                          <stop offset="100%" stopColor="#14211a" />
+                        </radialGradient>
+                      </defs>
+                      <rect width="64" height="48" fill="url(#hg)" />
+                      <rect x="10" y="18" width="20" height="14" rx="1" fill="rgba(180,160,100,0.35)" />
+                      <rect x="34" y="8" width="16" height="22" rx="1" fill="rgba(160,180,120,0.28)" />
+                      {/* road + label overlay signals the "hybrid" (imagery + labels) look */}
+                      <path d="M 2 40 L 30 24 L 62 26" fill="none" stroke="#ffd23f" strokeWidth="1.5" opacity="0.9" />
+                      <path d="M 20 46 L 26 6" fill="none" stroke="#ffffff" strokeWidth="1" opacity="0.7" />
+                      <rect x="36" y="34" width="14" height="4" rx="1" fill="rgba(255,255,255,0.85)" />
+                    </svg>
+                  ),
+                },
+                {
                   id: 'osm' as MapMode,
                   label: 'OpenStreet',
                   preview: (
@@ -2014,10 +2059,11 @@ export function MapContainer() {
         const gradients: Record<MapMode, string> = {
           osm: 'linear-gradient(to right, rgba(255,240,120,0.5), rgba(255,190,30,0.7), rgba(255,110,20,0.82), rgba(180,30,10,0.9))',
           satellite: 'linear-gradient(to right, rgba(0,120,255,0.5), rgba(0,220,200,0.7), rgba(255,220,0,0.82), rgba(255,240,240,0.95))',
+          hybrid: 'linear-gradient(to right, rgba(0,120,255,0.5), rgba(0,220,200,0.7), rgba(255,220,0,0.82), rgba(255,240,240,0.95))',
           martin: 'linear-gradient(to right, rgba(90,40,170,0.5), rgba(160,60,240,0.7), rgba(251,191,36,0.82), rgba(255,255,255,0.95))',
         };
         const modeLabels: Record<MapMode, string> = {
-          osm: 'OpenStreet', satellite: 'Satellite', martin: 'Site Map',
+          osm: 'OpenStreet', satellite: 'Satellite', hybrid: 'Hybrid', martin: 'Site Map',
         };
         return (
           <div style={{

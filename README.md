@@ -1,8 +1,10 @@
 # 🌍 SiteLens — Site Analysis Platform
 
-*A high-performance geospatial intelligence dashboard for data-driven retail expansion and site selection.*
+*A geospatial location-intelligence platform for data-driven retail expansion and site selection.*
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-Visit%20App-6366f1?style=for-the-badge&logo=googlechrome&logoColor=white)](https://sitelens.d35ojuq379jh1i.amplifyapp.com/)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Visit%20App-6366f1?style=for-the-badge&logo=googlechrome&logoColor=white)](https://sitelens-kto5.onrender.com/)
+
+> 🔗 **Live demo:** [sitelens-kto5.onrender.com](https://sitelens-kto5.onrender.com/) &nbsp;·&nbsp; *Hosted on a free tier — the first load may take ~30–50s to wake the server, then it's fast.*
 
 ---
 
@@ -41,42 +43,40 @@ Generates a proprietary Walkability and Footfall score by analyzing road segment
 
 ---
 
-## Technical Architecture
+## 🏗️ Technical Architecture
 
-*   **Frontend**: React, TypeScript, MapLibre GL JS
-*   **Backend**: Node.js, Express, PostGIS (Amazon RDS)
-*   **Tile Server**: Martin (Rust-based) streaming ultra-fast PBF vector tiles directly from PostGIS to the client.
-*   **Cloud Deployment**: AWS EC2, Application Load Balancer, Amazon ECR
+*   **Frontend**: React, TypeScript, Vite, MapLibre GL JS (interactive vector + raster maps, multiple base layers incl. Google Hybrid)
+*   **Backend**: Python, FastAPI — spatial REST APIs and PostGIS-backed vector tiles (`ST_AsMVT`)
+*   **Database**: PostgreSQL + PostGIS on Amazon RDS
+*   **Spatial performance**: GiST / geography indexing, PostgreSQL tuning, materialized views, and H3 aggregation — queries tuned up to **~192× faster**
+*   **Data pipeline**: `osm2pgsql` import of OpenStreetMap features into PostGIS (12M+ features)
+*   **Deployment**: Single-origin Docker image on AWS EC2 (FastAPI serves the built React app *and* the API from one origin — no CORS), PostGIS on Amazon RDS, provisioned via AWS CloudFormation; HTTPS fronted by a lightweight reverse proxy
 
 ---
 
-## Quick Start (Local Development)
+## 🚀 Quick Start (Local Development)
 
-We use a **Single Source of Truth** environment architecture.
+The full stack runs locally with Docker — no AWS account needed.
 
-### Step 1: Configure Environment Variables
-1. **Server**: Copy `server/.env.example` to `server/.env`. Fill in your local PostGIS credentials and your `GOOGLE_PLACES_KEY`.
-2. **Client**: Copy `client/.env.example` to `client/.env.development`.
+**Prerequisites:** Docker, and an OpenStreetMap extract saved as `./data/region.osm.pbf` (see [`backend-py/DB-SETUP.md`](./backend-py/DB-SETUP.md)).
 
-### Step 2: Spin Up the Infrastructure
-Run the following from the root of the repository:
 ```bash
-docker-compose up -d
+# Builds PostGIS, imports the OSM data, and starts the FastAPI API + React client
+docker compose -f docker-compose.local.yml up --build
 ```
-This builds and starts the Node.js API (`8080`), the Martin Tile Server (`3000`), and the Python Service (`8000`).
 
-### Step 3: Start the Frontend
-```bash
-cd client
-npm install
-npm run dev
-```
+This starts:
+*   **PostGIS** database (port `5433`)
+*   **osm-loader** — one-shot: imports the `.pbf` and applies spatial migrations, then exits
+*   **FastAPI backend** → `http://localhost:8080`
+*   **React client** → `http://localhost:5175`
+
+See [`LOCAL-DOCKER.md`](./LOCAL-DOCKER.md) for the full walkthrough.
 
 ---
 
 ## 📚 Documentation & Guides
 
-*   [**Infrastructure Setup**](./infrastructure/): Modular CFN templates for VPC, RDS, and Backend.
-*   [**Database Migration**](./doc/db-migration.md): Guide for moving PostGIS data to AWS RDS.
-*   [**Operational Guide**](./doc/operational-guide.md): Connection guides for DBeaver, SSL, and SSM recovery.
-*   [**Deployment Scripts**](./scripts/): Automated CI/CD powershell scripts.
+*   [**Local Docker Setup**](./LOCAL-DOCKER.md): Run the whole stack locally in one command.
+*   [**Database Setup**](./backend-py/DB-SETUP.md): Rebuild PostGIS from a raw OpenStreetMap extract.
+*   [**Infrastructure (AWS)**](./infrastructure/deploy/README.md): CloudFormation stacks for VPC, RDS, EC2, and frontend delivery.
