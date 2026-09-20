@@ -1,0 +1,14 @@
+{
+	# Render terminates TLS at its edge and forwards plain HTTP to this
+	# container on $PORT, so Caddy itself does no TLS here — it just proxies.
+	admin off
+}
+
+:{$PORT} {
+	encode gzip
+
+	# Forward everything (SPA, /api/*, /tiles/*, /health) to the EC2 origin.
+	# Override the target on Render by setting an env var UPSTREAM=<ip:port>
+	# if the EC2 public IP ever changes — no code change needed.
+	reverse_proxy {$UPSTREAM:13.126.191.50:80}
+}
