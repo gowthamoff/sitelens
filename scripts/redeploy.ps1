@@ -8,6 +8,9 @@ param (
     [string]$Region = "ap-south-1"
 )
 
+# Build logs contain unicode (checkmarks etc.) - keep the console from choking
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
+
 # Warn if local work has not been pushed (the EC2 pull would miss it)
 $ahead = git -C (Join-Path $PSScriptRoot "..") status -sb 2>$null | Select-Object -First 1
 if ($ahead -match "ahead") { Write-Host "WARNING: local branch is ahead of remote - push before redeploying." -ForegroundColor Yellow }
@@ -46,12 +49,13 @@ do {
     Write-Host "  status: $status"
 } while ($status -in @("Pending", "InProgress", "Delayed"))
 
-$out = aws ssm get-command-invocation --command-id $cmdId --instance-id $InstanceId `
-    --query "{out:StandardOutputContent,err:StandardErrorContent}" --output json --region $Region | ConvertFrom-Json
-
 Write-Host "`n----- output (tail) -----" -ForegroundColor Cyan
-($out.out -split "`n" | Select-Object -Last 30) -join "`n"
-if ($out.err) { Write-Host "----- stderr -----" -ForegroundColor Yellow; ($out.err -split "`n" | Select-Object -Last 15) -join "`n" }
+$stdout = aws ssm get-command-invocation --command-id $cmdId --instance-id $InstanceId `
+    --query "StandardOutputContent" --output text --region $Region
+($stdout -split "`n" | Select-Object -Last 30) -join "`n"
+$stderr = aws ssm get-command-invocation --command-id $cmdId --instance-id $InstanceId `
+    --query "StandardErrorContent" --output text --region $Region
+if ($stderr -and $stderr -ne "None") { Write-Host "----- stderr (tail) -----" -ForegroundColor Yellow; ($stderr -split "`n" | Select-Object -Last 15) -join "`n" }
 
 if ($status -eq "Success") { Write-Host "`nRedeploy complete." -ForegroundColor Green }
 else { Write-Host "`nRedeploy FAILED ($status) - see output above." -ForegroundColor Red; exit 1 }
