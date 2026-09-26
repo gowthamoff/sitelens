@@ -1048,6 +1048,86 @@ export function MapContainer() {
     return cleanup;
   }, [analysisData, activeTab, mapMode]);
 
+  // ── H3 Density Hexbins (precomputed, whole dataset) ─────────────────────────
+  // City-scale complement to the heatmap: reads the batch-built h3_poi_density
+  // table via /api/h3/density/precomputed (see app/tools/h3_precompute.py).
+  // Fetched once and cached; shown on the footfall tab at low zoom — the point
+  // heatmap takes over as you zoom in.
+  const h3HexesRef = useRef<GeoJSON.FeatureCollection | null>(null);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const HEX_SOURCE = 'h3-density';
+    const HEX_FILL = 'h3-density-fill';
+    const HEX_LINE = 'h3-density-line';
+    const show = activeTab === 'footfall';
+
+    [HEX_FILL, HEX_LINE].forEach(id => {
+      try { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', show ? 'visible' : 'none'); } catch (_) { }
+    });
+    if (!show) return;
+
+    let cancelled = false;
+
+    const addLayers = (data: GeoJSON.FeatureCollection) => {
+      if (cancelled || !mapRef.current) return;
+      try { if (!map.getSource(HEX_SOURCE)) map.addSource(HEX_SOURCE, { type: 'geojson', data }); }
+      catch (e) { console.error('[H3] addSource failed:', e); return; }
+      if (map.getLayer(HEX_FILL)) return;
+      try {
+        map.addLayer({
+          id: HEX_FILL,
+          type: 'fill',
+          source: HEX_SOURCE,
+          maxzoom: 13,
+          paint: {
+            'fill-color': [
+              'interpolate', ['linear'], ['get', 'weight'],
+              0, 'rgba(255,235,150,0.10)',
+              0.15, 'rgba(255,200,60,0.35)',
+              0.4, 'rgba(255,130,30,0.5)',
+              0.7, 'rgba(230,60,20,0.6)',
+              1, 'rgba(180,20,20,0.7)',
+            ],
+          },
+        });
+        map.addLayer({
+          id: HEX_LINE,
+          type: 'line',
+          source: HEX_SOURCE,
+          maxzoom: 13,
+          paint: { 'line-color': 'rgba(255,255,255,0.25)', 'line-width': 0.5 },
+        });
+      } catch (e) { console.error('[H3] addLayer failed:', e); }
+    };
+
+    const apply = (data: GeoJSON.FeatureCollection) => {
+      const styleReady = () => { try { return !!map.getStyle()?.layers; } catch { return false; } };
+      if (styleReady()) { addLayers(data); return; }
+      const onStyleData = () => {
+        if (!styleReady()) return;
+        map.off('styledata', onStyleData);
+        addLayers(data);
+      };
+      map.on('styledata', onStyleData);
+    };
+
+    if (h3HexesRef.current) { apply(h3HexesRef.current); return () => { cancelled = true; }; }
+
+    fetch(`${API_BASE}/api/h3/density/precomputed`)
+      .then(r => { if (!r.ok) throw new Error(`H3 precomputed ${r.status}`); return r.json(); })
+      .then(body => {
+        const fc = body?.data;
+        if (!fc?.features?.length) return;
+        h3HexesRef.current = fc;
+        apply(fc);
+      })
+      .catch(e => console.error('[H3] fetch failed:', e));
+
+    return () => { cancelled = true; };
+  }, [activeTab, mapMode]);
+
 
   // ── Competitor & Gaps Layers ────────────────────────────────────────────────
   useEffect(() => {
