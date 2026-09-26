@@ -27,19 +27,20 @@ _PBF_HEADERS = {
 
 _POLYGON_SQL = """
 WITH env AS (SELECT ST_TileEnvelope(%(z)s::int, %(x)s::int, %(y)s::int) AS env3857)
-SELECT ST_AsMVT(tile, 'osm_polygons', 4096, 'geom') AS mvt FROM (
+SELECT ST_AsMVT(tile, 'planet_osm_polygon', 4096, 'geom') AS mvt FROM (
   SELECT
-    osm_id, name, landuse, building, leisure, "natural" AS nat,
+    osm_id, name, admin_level, place, water, landuse, building, leisure, "natural",
     ST_AsMVTGeom(ST_Transform(way, 3857), env.env3857, 4096, 256, true) AS geom
   FROM planet_osm_polygon, env
   WHERE way && ST_Transform(env.env3857, 4326)
-    AND (landuse IS NOT NULL OR building IS NOT NULL OR leisure IS NOT NULL OR "natural" IS NOT NULL)
+    AND (landuse IS NOT NULL OR building IS NOT NULL OR leisure IS NOT NULL OR "natural" IS NOT NULL
+         OR boundary = 'administrative' OR admin_level IS NOT NULL OR place IS NOT NULL OR water IS NOT NULL)
 ) AS tile;
 """
 
 _LINE_SQL = """
 WITH env AS (SELECT ST_TileEnvelope(%(z)s::int, %(x)s::int, %(y)s::int) AS env3857)
-SELECT ST_AsMVT(tile, 'osm_lines', 4096, 'geom') AS mvt FROM (
+SELECT ST_AsMVT(tile, 'planet_osm_line', 4096, 'geom') AS mvt FROM (
   SELECT
     osm_id, name, highway, waterway, railway,
     ST_AsMVTGeom(ST_Transform(way, 3857), env.env3857, 4096, 256, true) AS geom
@@ -51,7 +52,7 @@ SELECT ST_AsMVT(tile, 'osm_lines', 4096, 'geom') AS mvt FROM (
 
 _POINT_SQL = """
 WITH env AS (SELECT ST_TileEnvelope(%(z)s::int, %(x)s::int, %(y)s::int) AS env3857)
-SELECT ST_AsMVT(tile, 'osm_points', 4096, 'geom') AS mvt FROM (
+SELECT ST_AsMVT(tile, 'planet_osm_point', 4096, 'geom') AS mvt FROM (
   SELECT
     osm_id, name, amenity, shop, leisure, tourism, highway,
     ST_AsMVTGeom(ST_Transform(way, 3857), env.env3857, 4096, 256, true) AS geom
@@ -62,19 +63,68 @@ SELECT ST_AsMVT(tile, 'osm_points', 4096, 'geom') AS mvt FROM (
 """
 
 
-def _sql_for_layer(layer: str):
+# Low-zoom tiles come from the mv_tiles_* materialized views (migrations/tile-mvs.sql):
+# pre-filtered, pre-simplified, already in 3857 — no per-request transform or
+# simplification. The client draws buildings/POIs/minor roads only from z12+
+# (mapLayerConfig.ts minzooms), so everything visible at z<=11 is in the views.
+_MV_MAX_ZOOM = 11
+
+_POLYGON_SQL_LOW = """
+WITH env AS (SELECT ST_TileEnvelope(%(z)s::int, %(x)s::int, %(y)s::int) AS env3857)
+SELECT ST_AsMVT(tile, 'planet_osm_polygon', 4096, 'geom') AS mvt FROM (
+  SELECT
+    m.osm_id, m.name, m.admin_level, m.place, m."natural", m.landuse, m.water, m.leisure,
+    ST_AsMVTGeom(m.geom, env.env3857, 4096, 256, true) AS geom
+  FROM mv_tiles_polygon_low m, env
+  WHERE m.geom && env.env3857
+) AS tile;
+"""
+
+_LINE_SQL_LOW = """
+WITH env AS (SELECT ST_TileEnvelope(%(z)s::int, %(x)s::int, %(y)s::int) AS env3857)
+SELECT ST_AsMVT(tile, 'planet_osm_line', 4096, 'geom') AS mvt FROM (
+  SELECT
+    m.osm_id, m.name, m.highway, m.railway, m.waterway,
+    ST_AsMVTGeom(m.geom, env.env3857, 4096, 256, true) AS geom
+  FROM mv_tiles_line_low m, env
+  WHERE m.geom && env.env3857
+) AS tile;
+"""
+
+_POINT_SQL_LOW = """
+WITH env AS (SELECT ST_TileEnvelope(%(z)s::int, %(x)s::int, %(y)s::int) AS env3857)
+SELECT ST_AsMVT(tile, 'planet_osm_point', 4096, 'geom') AS mvt FROM (
+  SELECT
+    m.osm_id, m.name, m.place,
+    ST_AsMVTGeom(m.geom, env.env3857, 4096, 256, true) AS geom
+  FROM mv_tiles_point_low m, env
+  WHERE m.geom && env.env3857
+) AS tile;
+"""
+
+
+def _sql_for_layer(layer: str, z: int = None):
     # Same routing as tiles.js: substring match on the layer/table name.
+    # z at or below _MV_MAX_ZOOM serves from the materialized views.
+    low = z is not None and z <= _MV_MAX_ZOOM
     if "polygon" in layer:
-        return _POLYGON_SQL
+        return _POLYGON_SQL_LOW if low else _POLYGON_SQL
     if "line" in layer:
-        return _LINE_SQL
-    return _POINT_SQL
+        return _LINE_SQL_LOW if low else _LINE_SQL
+    return _POINT_SQL_LOW if low else _POINT_SQL
 
 
 def _handle(layer: str, z: str, x: str, y: str):
     try:
         zi, xi, yi = int(z), int(x), int(str(y).replace(".pbf", ""))
-        row = db.query_one(_sql_for_layer(layer), {"z": zi, "x": xi, "y": yi})
+        try:
+            row = db.query_one(_sql_for_layer(layer, zi), {"z": zi, "x": xi, "y": yi})
+        except Exception as e:
+            # Views not applied on this DB yet — fall back to the raw tables.
+            if zi <= _MV_MAX_ZOOM and "mv_tiles_" in str(e) and "does not exist" in str(e):
+                row = db.query_one(_sql_for_layer(layer), {"z": zi, "x": xi, "y": yi})
+            else:
+                raise
         tile = row["mvt"] if row else None
         if tile is None or len(bytes(tile)) == 0:
             return Response(status_code=204, headers=_PBF_HEADERS)
