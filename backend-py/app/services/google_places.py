@@ -65,6 +65,8 @@ def fetch_google_places(lat, lng, radius, business_type="restaurant"):
         "X-Goog-FieldMask": _FIELD_MASK,
     }
     try:
+        # Enrichment is optional: any failure past this point (timeout, network, non-200)
+        # returns [] so the analysis degrades to OSM-only instead of failing outright.
         with httpx.Client(timeout=10.0) as client:
             res = client.post(
                 "https://places.googleapis.com/v1/places:searchNearby",
@@ -107,19 +109,28 @@ def normalise_google_place(g, site_lat, site_lng):
 
 
 def merge_osm_with_google(osm_list, g_places, site_lat, site_lng):
-    """For each Google place: enrich a matching OSM row within 30 m, else append it."""
+    """For each Google place: enrich a matching OSM row within 30 m, else append it.
+
+    Resulting `source` tags: 'osm+google' = matched (OSM's authoritative geometry +
+    Google's live business data), 'google' = live business not yet mapped in OSM,
+    'osm' = mapped but not found live by Google.
+    """
     merged = [{**p, "source": "osm"} for p in osm_list]
 
     for g in g_places:
         norm = normalise_google_place(g, site_lat, site_lng)
         if not norm:
             continue
+        # "Same place" = within 30 m: GPS/digitization jitter between the two sources
+        # rarely puts one venue further apart than that, while genuinely distinct
+        # neighbours usually are. No name matching — spellings diverge too much.
         duplicate = next(
             (osm for osm in merged
              if haversine_metres(osm["lat"], osm["lng"], norm["lat"], norm["lng"]) < 30),
             None,
         )
         if duplicate:
+            # Matched: keep OSM geometry/distance, overlay Google's live fields only.
             duplicate["rating"] = norm["rating"]
             duplicate["review_count"] = norm["review_count"]
             duplicate["open_now"] = norm["open_now"]

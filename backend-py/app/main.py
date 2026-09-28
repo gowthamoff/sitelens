@@ -1,13 +1,10 @@
 """
-FastAPI application + Lambda handler (Mangum).
-
-This is the single Lambda behind the API Gateway HTTP API. It reproduces the
-Express app's routes, auth, validation and response envelopes. The old
-cross-cutting concerns map as follows:
-  - helmet / compression      → handled by API Gateway / CloudFront (not here)
-  - cors                      → CORSMiddleware below
-  - express-rate-limit        → API Gateway stage throttling (see template.yaml)
-  - redis look-aside cache    → dropped (optional CDN caching instead)
+FastAPI application — runs under uvicorn in the Docker container on EC2,
+behind the HTTPS reverse proxy (single-origin: serves the API, tiles, and
+the built React SPA). Cross-cutting concerns:
+  - compression / TLS         → reverse proxy (Caddy/nginx)
+  - cors                      → CORSMiddleware below (moot on single origin)
+  - rate limiting / caching   → proxy layer when needed
   - global errorHandler       → exception handlers below
 """
 import json
@@ -18,7 +15,6 @@ from decimal import Decimal
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from mangum import Mangum
 
 from . import config
 from .common import ApiError, AuthError, error_body
@@ -45,7 +41,7 @@ class SafeJSONResponse(JSONResponse):
         return json.dumps(content, ensure_ascii=False, allow_nan=False, default=_json_default).encode("utf-8")
 
 
-app = FastAPI(title="SiteLens API (Python/Lambda)", default_response_class=SafeJSONResponse)
+app = FastAPI(title="SiteLens API", default_response_class=SafeJSONResponse)
 
 app.add_middleware(
     CORSMiddleware,
@@ -117,6 +113,3 @@ if os.path.isdir(_STATIC_DIR):
             return FileResponse(candidate)
         return FileResponse(os.path.join(_STATIC_DIR, "index.html"))
 
-
-# AWS Lambda entry point (referenced by template.yaml Handler: app.main.handler).
-handler = Mangum(app, lifespan="off")

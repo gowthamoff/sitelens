@@ -18,6 +18,8 @@ Config (env vars; see dags/README.md for the tunnel setup):
   SITELENS_DB_HOST / SITELENS_DB_PORT / SITELENS_DB_NAME / SITELENS_DB_USER /
   SITELENS_DB_PASS — Postgres/PostGIS target (RDS via the SSM tunnel, or local)
   SITELENS_PBF     — path to the OSM extract (default: repo data/region.osm.pbf)
+  SITELENS_PBF_URL — optional Geofabrik URL; when set, the download task pulls a
+                     new extract only if the remote .md5 differs from the local file
 
 Run without a scheduler:  airflow dags test sitelens_etl 2026-09-26
 """
@@ -74,16 +76,51 @@ def _one(cur, sql, params=None):
 )
 def sitelens_etl():
 
+    def _file_md5(path):
+        h = hashlib.md5()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
+    @task
+    def download():
+        """Fetch the extract from SITELENS_PBF_URL if the remote copy changed.
+
+        Geofabrik publishes <url>.md5 alongside each extract, so we compare
+        checksums (a few bytes) before pulling ~0.5 GB. No URL configured ->
+        keep using the locally provided file (manual mode).
+        """
+        url = os.environ.get("SITELENS_PBF_URL")
+        if not url:
+            print("SITELENS_PBF_URL not set — using the local extract as-is")
+            return "local"
+        import urllib.request
+
+        remote_md5 = None
+        try:
+            with urllib.request.urlopen(url + ".md5", timeout=30) as r:
+                remote_md5 = r.read().decode().split()[0]
+        except Exception as e:
+            print(f"no remote .md5 ({e}) — downloading unconditionally")
+        if remote_md5 and os.path.exists(PBF) and _file_md5(PBF) == remote_md5:
+            print("local extract already matches remote md5 — no download")
+            return "unchanged"
+
+        tmp = PBF + ".part"
+        with urllib.request.urlopen(url, timeout=60) as r, open(tmp, "wb") as out:
+            for chunk in iter(lambda: r.read(1 << 20), b""):
+                out.write(chunk)
+        os.replace(tmp, PBF)  # atomic rename — never a half-written extract in place
+        print(f"downloaded {round(os.path.getsize(PBF) / 1e6, 1)} MB")
+        return "downloaded"
+
     @task
     def extract():
         """Hash the source extract; expose size + whether it changed since last run."""
         if not os.path.exists(PBF):
             raise AirflowException(f"source extract not found: {PBF}")
-        h = hashlib.md5()
-        with open(PBF, "rb") as f:
-            for chunk in iter(lambda: f.read(1 << 20), b""):
-                h.update(chunk)
-        digest = h.hexdigest()
+        digest = _file_md5(PBF)
         previous = Variable.get("sitelens_pbf_md5", default_var=None)
         Variable.set("sitelens_pbf_md5", digest)
         return {
@@ -228,7 +265,9 @@ def sitelens_etl():
         print(summary)
         return summary
 
+    fetched = download()
     source = extract()
+    fetched >> source
     gate = freshness_gate(source)
     loaded = load_osm()
     gate >> [loaded, skip_load]

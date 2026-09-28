@@ -29,8 +29,10 @@ _CONNINFO = (
     f"connect_timeout=10 options='-c statement_timeout=120000 -c jit=off'"
 )
 
-# open=True connects lazily on first checkout; min_size keeps one warm connection
-# alive between invocations. max_size caps concurrency within a single container.
+# A fresh RDS connection costs ~100ms (TCP + TLS + auth handshake); the pool pays
+# that once and amortizes it across requests. open=True connects lazily on first
+# checkout; min_size keeps one warm connection alive between invocations. max_size
+# caps concurrency within a single container.
 pool = ConnectionPool(
     conninfo=_CONNINFO,
     min_size=1,
@@ -73,6 +75,7 @@ def num(v, default=0):
 
 
 def to_int(v, default=0):
+    """Coerce to int via float, so Decimal('3.0') and '3.0' both work — like parseInt."""
     if v is None:
         return default
     try:

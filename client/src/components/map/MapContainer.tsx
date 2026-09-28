@@ -13,6 +13,15 @@ import { buildSources, MAP_LAYERS } from './mapLayerConfig';
 
 type MapMode = 'martin' | 'satellite' | 'hybrid' | 'osm';
 
+// Legend gradients mirroring the H3 hexbin fill ramps (see hexFill in the
+// footfall effect) — one per base map so the legend always matches the layer.
+const H3_LEGEND_GRADIENTS: Record<MapMode, string> = {
+  osm: 'linear-gradient(to right, rgba(255,235,150,0.5), rgba(255,200,60,0.8), rgba(255,130,30,0.9), rgba(230,60,20,1), rgba(180,20,20,1))',
+  satellite: 'linear-gradient(to right, rgba(0,120,255,0.6), rgba(0,220,200,0.85), rgba(255,220,0,0.95), rgba(255,110,20,1), rgba(255,250,240,1))',
+  hybrid: 'linear-gradient(to right, rgba(0,120,255,0.6), rgba(0,220,200,0.85), rgba(255,220,0,0.95), rgba(255,110,20,1), rgba(255,250,240,1))',
+  martin: 'linear-gradient(to right, rgba(90,40,170,0.6), rgba(160,60,240,0.85), rgba(251,191,36,0.95), rgba(251,113,44,1), rgba(255,255,255,1))',
+};
+
 // SVG pin definitions — keyed so they can be registered eagerly on map load
 const PIN_SVGS: Record<string, string> = {
   'pin-google': `<svg width="32" height="42" viewBox="0 0 32 42" xmlns="http://www.w3.org/2000/svg"><path d="M16 2C8.268 2 2 8.268 2 16c0 10 14 24 14 24s14-14 14-24c0-7.732-6.268-14-14-14z" fill="#4f9cf9" stroke="#161b22" stroke-width="2"/><circle cx="16" cy="15" r="5" fill="#ffffff"/></svg>`,
@@ -49,7 +58,7 @@ export function MapContainer() {
   // Ref so async callbacks can read latest activeTab without stale closure.
   // Cannot use activeTab here (declared by useAnalysis() below) — initialize with default.
   const activeTabRef = useRef('demand-mix');
-  const [mapMode, setMapMode] = useState<MapMode>('osm');
+  const [mapMode, setMapMode] = useState<MapMode>('hybrid');
   const [showPicker, setShowPicker] = useState(false);
   const [searchPortal, setSearchPortal] = useState<HTMLElement | null>(null);
 
@@ -1070,34 +1079,68 @@ export function MapContainer() {
 
     let cancelled = false;
 
+    // Weight ramp per base map — hexes must read on light tiles, dark vector,
+    // and (the main demo view) satellite/hybrid imagery.
+    const hexFill = (mode: MapMode) => {
+      if (mode === 'osm') {
+        // Light tiles — warm amber → deep red, restrained opacity
+        return [
+          'interpolate', ['linear'], ['get', 'weight'],
+          0, 'rgba(255,235,150,0.10)',
+          0.15, 'rgba(255,200,60,0.35)',
+          0.4, 'rgba(255,130,30,0.5)',
+          0.7, 'rgba(230,60,20,0.6)',
+          1, 'rgba(180,20,20,0.7)',
+        ];
+      }
+      if (mode === 'satellite' || mode === 'hybrid') {
+        // Dark aerial imagery — infrared ramp, bright peaks so hot cells glow
+        return [
+          'interpolate', ['linear'], ['get', 'weight'],
+          0, 'rgba(0,120,255,0.15)',
+          0.15, 'rgba(0,220,200,0.45)',
+          0.4, 'rgba(255,220,0,0.55)',
+          0.7, 'rgba(255,110,20,0.7)',
+          1, 'rgba(255,250,240,0.85)',
+        ];
+      }
+      // Martin (dark vector) — purple → amber → white
+      return [
+        'interpolate', ['linear'], ['get', 'weight'],
+        0, 'rgba(90,40,170,0.15)',
+        0.15, 'rgba(160,60,240,0.4)',
+        0.4, 'rgba(251,191,36,0.55)',
+        0.7, 'rgba(251,113,44,0.7)',
+        1, 'rgba(255,255,255,0.9)',
+      ];
+    };
+    const hexLine = (mode: MapMode) =>
+      mode === 'osm' ? 'rgba(120,60,20,0.35)' : 'rgba(255,255,255,0.35)';
+
     const addLayers = (data: GeoJSON.FeatureCollection) => {
       if (cancelled || !mapRef.current) return;
       try { if (!map.getSource(HEX_SOURCE)) map.addSource(HEX_SOURCE, { type: 'geojson', data }); }
       catch (e) { console.error('[H3] addSource failed:', e); return; }
-      if (map.getLayer(HEX_FILL)) return;
+      if (map.getLayer(HEX_FILL)) {
+        // Layers survive tab toggles — just re-tint for the current base map
+        map.setPaintProperty(HEX_FILL, 'fill-color', hexFill(mapMode));
+        map.setPaintProperty(HEX_LINE, 'line-color', hexLine(mapMode));
+        return;
+      }
       try {
         map.addLayer({
           id: HEX_FILL,
           type: 'fill',
           source: HEX_SOURCE,
           maxzoom: 13,
-          paint: {
-            'fill-color': [
-              'interpolate', ['linear'], ['get', 'weight'],
-              0, 'rgba(255,235,150,0.10)',
-              0.15, 'rgba(255,200,60,0.35)',
-              0.4, 'rgba(255,130,30,0.5)',
-              0.7, 'rgba(230,60,20,0.6)',
-              1, 'rgba(180,20,20,0.7)',
-            ],
-          },
+          paint: { 'fill-color': hexFill(mapMode) },
         });
         map.addLayer({
           id: HEX_LINE,
           type: 'line',
           source: HEX_SOURCE,
           maxzoom: 13,
-          paint: { 'line-color': 'rgba(255,255,255,0.25)', 'line-width': 0.5 },
+          paint: { 'line-color': hexLine(mapMode), 'line-width': 0.5 },
         });
       } catch (e) { console.error('[H3] addLayer failed:', e); }
     };
@@ -1670,6 +1713,24 @@ export function MapContainer() {
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <div id="map" ref={mapContainerRef} style={{ position: 'absolute', inset: 0 }}></div>
+
+      {/* H3 density legend — footfall tab only, matches the active base map's ramp */}
+      {activeTab === 'footfall' && (
+        <div style={{
+          position: 'absolute', left: 12, bottom: 28, zIndex: 100, pointerEvents: 'none',
+          background: 'rgba(22, 27, 34, 0.65)', backdropFilter: 'blur(24px)',
+          border: '1px solid var(--glass-border)', borderRadius: 10,
+          padding: '7px 10px', display: 'flex', flexDirection: 'column', gap: 5,
+        }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim, #8b949e)' }}>
+            POI density (H3)
+          </span>
+          <div style={{ width: 140, height: 8, borderRadius: 4, background: H3_LEGEND_GRADIENTS[mapMode] }} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim, #8b949e)' }}>
+            <span>Low</span><span>High</span>
+          </div>
+        </div>
+      )}
 
       {/* Geocoding Search - Rendered into the top-left flex container via Portal */}
       {searchPortal && createPortal(

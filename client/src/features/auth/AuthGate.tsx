@@ -19,6 +19,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+// Shared demo account for reviewers — no sign-up friction, auth flow stays intact.
+const DEMO_EMAIL = 'demo@sitelens.app';
+const DEMO_PASSWORD = 'sitelens-demo-2026';
+
 function AuthScreen() {
   const { login, register } = useAuth();
   const [mode, setMode] = useState<'login' | 'register'>('login');
@@ -36,6 +40,23 @@ function AuthScreen() {
       else await register(email.trim(), password);
     } catch (err: any) {
       setError(err?.message || 'Something went wrong');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onTryDemo() {
+    setError(null);
+    setBusy(true);
+    try {
+      try {
+        await login(DEMO_EMAIL, DEMO_PASSWORD);
+      } catch {
+        // First run on a fresh database — create the demo account, which also signs in.
+        await register(DEMO_EMAIL, DEMO_PASSWORD);
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Demo login failed');
     } finally {
       setBusy(false);
     }
@@ -81,6 +102,15 @@ function AuthScreen() {
           fontWeight: 700, fontSize: 14, cursor: busy ? 'default' : 'pointer',
         }}>
           {busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Sign up'}
+        </button>
+
+        <button type="button" onClick={onTryDemo} disabled={busy} style={{
+          padding: '10px 14px', borderRadius: 10,
+          border: '1px solid var(--accent, #4f9cf9)', background: 'transparent',
+          color: 'var(--accent, #4f9cf9)', fontWeight: 700, fontSize: 14,
+          cursor: busy ? 'default' : 'pointer',
+        }}>
+          Try the demo — no sign-up
         </button>
 
         <div style={{ textAlign: 'center', fontSize: 13, color: 'var(--text-dim, #8b949e)' }}>

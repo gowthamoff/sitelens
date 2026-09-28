@@ -117,14 +117,7 @@ def _sql_for_layer(layer: str, z: int = None):
 def _handle(layer: str, z: str, x: str, y: str):
     try:
         zi, xi, yi = int(z), int(x), int(str(y).replace(".pbf", ""))
-        try:
-            row = db.query_one(_sql_for_layer(layer, zi), {"z": zi, "x": xi, "y": yi})
-        except Exception as e:
-            # Views not applied on this DB yet — fall back to the raw tables.
-            if zi <= _MV_MAX_ZOOM and "mv_tiles_" in str(e) and "does not exist" in str(e):
-                row = db.query_one(_sql_for_layer(layer), {"z": zi, "x": xi, "y": yi})
-            else:
-                raise
+        row = db.query_one(_sql_for_layer(layer, zi), {"z": zi, "x": xi, "y": yi})
         tile = row["mvt"] if row else None
         if tile is None or len(bytes(tile)) == 0:
             return Response(status_code=204, headers=_PBF_HEADERS)
@@ -134,13 +127,7 @@ def _handle(layer: str, z: str, x: str, y: str):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
-# Primary pattern used by the client: /tiles/{layer}/{z}/{x}/{y}
+# Tile pattern used by the client: /tiles/{layer}/{z}/{x}/{y}
 @router.get("/{layer}/{z}/{x}/{y}")
 def tile_with_layer(layer: str, z: str, x: str, y: str):
     return _handle(layer, z, x, y)
-
-
-# Legacy fallback: /tiles/{z}/{x}/{y} (layer defaults to points, like the old route).
-@router.get("/{z}/{x}/{y}")
-def tile_no_layer(z: str, x: str, y: str):
-    return _handle("points", z, x, y)

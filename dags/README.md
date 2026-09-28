@@ -40,6 +40,7 @@ export SITELENS_DB_PASS='<the RDS password>'
 For the UI (graph view, run history): `~/airflow-venv/bin/airflow standalone`,
 then open http://localhost:8080.
 
-Config knobs (env): `SITELENS_PBF`, `SITELENS_MIN_POINTS/LINES/POLYGONS`
+Config knobs (env): `SITELENS_PBF`, `SITELENS_PBF_URL` (Geofabrik URL — enables
+auto-download, checksum-guarded; unset = use the local file), `SITELENS_MIN_POINTS/LINES/POLYGONS`
 (quality-gate floors — raise for the full TN import), `SITELENS_H3_RES`,
 `SITELENS_DB_*` (host/port/name/user/pass/sslmode).

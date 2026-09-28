@@ -13,6 +13,9 @@ def business_type_sql(param, table_alias=""):
     """SQL CASE that resolves a business_type param to OSM tag predicates.
 
     `param` is a placeholder string injected into the SQL (e.g. '%(business_type)s').
+    The CASE arms are static text; only the placeholder *name* is f-string'd in — the
+    value is bound by psycopg at execute time, so user input never reaches the SQL
+    text and the f-string is injection-safe.
     """
     p = f"{table_alias}." if table_alias else ""
     return f"""
@@ -57,6 +60,7 @@ def format_road_type(t):
 def competitor_analysis(params):
     lng, lat, radius = params["lng"], params["lat"], params["radius"]
     business_type = params.get("business_type", "restaurant")
+    # Product cap: beyond 3 km a venue isn't a walk-in competitor; also bounds query cost.
     effective_radius = min(radius, 3000)
 
     sql = f"""
@@ -77,8 +81,12 @@ def competitor_analysis(params):
       LIMIT 50
     )
     SELECT
+      -- The two correlated subqueries below run once per competitor row. Fine here:
+      -- N <= 50 and each probe is GiST-index-assisted, so per-row cost is tiny.
+      -- At larger N the rewrite is a LATERAL join.
       c.*,
       (
+        -- Nearest highway within 60 m classifies the competitor as main-road vs side-street.
         SELECT l.highway
         FROM planet_osm_line l
         WHERE l.highway IS NOT NULL
@@ -91,6 +99,9 @@ def competitor_analysis(params):
         LIMIT 1
       ) AS road_type,
       (
+        -- Barrier heuristic: straight line site→competitor (ST_MakeLine) crossing a
+        -- railway/river/motorway = physical barrier to walk-in traffic. False positives
+        -- where bridges/underpasses exist — acceptable as a signal, not ground truth.
         SELECT EXISTS (
           SELECT 1 FROM planet_osm_line bl
           WHERE (
@@ -114,6 +125,7 @@ def competitor_analysis(params):
     """
     qp = {"lng": lng, "lat": lat, "business_type": business_type, "eff_radius": effective_radius}
 
+    # PostGIS query and Google Places call are independent — run concurrently, not sequentially.
     rows, google_places = gather(
         lambda: db.query(sql, qp),
         lambda: fetch_google_places(lat, lng, effective_radius, business_type),
@@ -231,6 +243,8 @@ def opportunity_gaps(params):
     SELECT
       fs.*,
       (
+        -- 300 m = "captive demand" radius around a footfall anchor. Zero same-type
+        -- supply inside it means the anchor's demand is unserved → an opportunity gap.
         SELECT COUNT(*)
         FROM planet_osm_point bp
         WHERE ({business_type_sql("%(business_type)s", "bp")})
@@ -242,11 +256,15 @@ def opportunity_gaps(params):
     """
     qp = {"lng": lng, "lat": lat, "eff_radius": effective_radius, "business_type": business_type}
 
+    # Anchors query (PostGIS) and Google fetch don't depend on each other — run concurrently.
     rows, google_places = gather(
         lambda: db.query(sql, qp),
         lambda: fetch_google_places(lat, lng, effective_radius, business_type),
     )
 
+    # Google points aren't in the DB, so their distance-to-anchor math happens in
+    # Python. Haversine is accurate to well under 1% at sub-km scale — plenty for a
+    # 300 m threshold.
     def haversine_m(lat1, lng1, lat2, lng2):
         R, rad = 6371000, math.pi / 180
         d_lat, d_lng = (lat2 - lat1) * rad, (lng2 - lng1) * rad
@@ -353,6 +371,7 @@ def competitor_context(comp_lng, comp_lat, site_lng, site_lat):
     """
     comp_ctx_rows, site_ctx_rows = [], []
     try:
+        # Same context query for both points — the two runs are independent, so concurrent.
         comp_ctx_rows, site_ctx_rows = gather(
             lambda: db.query(context_sql, {"lng": comp_lng, "lat": comp_lat}),
             lambda: db.query(context_sql, {"lng": site_lng, "lat": site_lat}),

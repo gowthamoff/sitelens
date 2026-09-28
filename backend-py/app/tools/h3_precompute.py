@@ -7,9 +7,12 @@ This is the "data pipeline" version of services/h3_density.py:
   TRANSFORM bin each point into an H3 cell id and tally counts (a dict, O(points))
   LOAD      write one row per cell (count + hexagon polygon), spatially indexed
 
-Run inside the backend container:
-    docker exec sitelens-backend python -m app.tools.h3_precompute 8
-(the integer arg is the H3 resolution; default 8 ≈ ~0.7 km hexes).
+Idempotent: the table is dropped and rebuilt, so re-runs never duplicate.
+
+Run inside the backend container (sitelens-api on EC2, sitelens-backend in
+local compose):
+    docker exec sitelens-api python -m app.tools.h3_precompute 8
+(the integer arg is the H3 resolution; default 8 ≈ 460 m edge / ~0.7 km² hexes).
 """
 import sys
 from collections import Counter
@@ -29,6 +32,8 @@ def precompute(resolution: int = 8):
     with db.pool.connection() as conn:
         with conn.cursor(name="h3_stream", row_factory=tuple_row) as cur:
             cur.itersize = 50_000  # server-side cursor → streams, never loads all rows
+            # h3 wants lat/lng in WGS84 — ST_Transform guards against imports
+            # whose `way` column is stored in another SRID.
             cur.execute(
                 f"SELECT ST_Y(ST_Transform(way,4326)), ST_X(ST_Transform(way,4326)) "
                 f"FROM planet_osm_point WHERE {_POI_WHERE}"
@@ -46,6 +51,8 @@ def precompute(resolution: int = 8):
     # ── LOAD: one row per cell with its hexagon polygon ──
     insert_rows = []
     for cell, c in counts.items():
+        # h3 returns (lat, lng) pairs; WKT wants "lng lat", and a valid
+        # polygon ring must repeat its first point to close.
         ring = [(lng_, lat_) for (lat_, lng_) in h3.cell_to_boundary(cell)]
         ring.append(ring[0])
         wkt = "POLYGON((" + ",".join(f"{x} {y}" for x, y in ring) + "))"
@@ -53,6 +60,8 @@ def precompute(resolution: int = 8):
 
     with db.pool.connection() as conn:
         with conn.cursor() as cur:
+            # Drop-and-recreate keeps the run idempotent, and readers only
+            # ever see the old table or the new one (single transaction).
             cur.execute("DROP TABLE IF EXISTS h3_poi_density")
             cur.execute(
                 "CREATE TABLE h3_poi_density ("
