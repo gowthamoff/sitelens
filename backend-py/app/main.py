@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from . import config
-from .common import ApiError, AuthError, error_body
+from .common import ApiError, AuthError, PlainError, error_body
 from .routes import (
     analysis, auth, cannibalization, competitors, demand_mix, geocode, h3, health, tiles,
 )
@@ -61,6 +61,11 @@ async def _auth_error(request: Request, exc: AuthError):
 @app.exception_handler(ApiError)
 async def _api_error(request: Request, exc: ApiError):
     return SafeJSONResponse(status_code=exc.status, content=error_body(exc.message, exc.status, exc.hint))
+
+
+@app.exception_handler(PlainError)
+async def _plain_error(request: Request, exc: PlainError):
+    return JSONResponse(status_code=exc.status, content={"error": exc.message})
 
 
 @app.exception_handler(Exception)

@@ -46,6 +46,14 @@ class AuthError(Exception):
         self.status = status
 
 
+class PlainError(Exception):
+    """Rendered as a bare {error} body — the legacy shape of the demand-mix routes."""
+    def __init__(self, message, status=400):
+        super().__init__(message)
+        self.message = message
+        self.status = status
+
+
 def validate_site_params(lat, lng, radius):
     """Port of validateSiteParams. Returns {lat,lng,radius} or raises ApiError(400)."""
     try:

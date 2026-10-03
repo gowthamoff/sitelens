@@ -1,8 +1,10 @@
 """Port of server/routes/competitors.js — all endpoints require auth."""
 from fastapi import APIRouter, Depends
+from pydantic import ValidationError
 
 from ..auth import require_auth
 from ..common import ApiError, success, validate_site_params
+from ..schemas.site import CompetitorQuery, competitor_error_message
 from ..services.competitor import (
     VALID_TYPES, competitor_analysis, competitor_context, opportunity_gaps,
 )
@@ -17,11 +19,17 @@ def _business_type(business_type):
     return bt
 
 
+def _competitor_query(lat: str = None, lng: str = None, radius: str = None,
+                      business_type: str = "restaurant") -> CompetitorQuery:
+    try:
+        return CompetitorQuery(lat=lat, lng=lng, radius=radius, business_type=business_type)
+    except ValidationError as e:
+        raise ApiError(competitor_error_message(e), 400)
+
+
 @router.get("")
-def competitors(lat: str = None, lng: str = None, radius: str = None, business_type: str = "restaurant"):
-    params = validate_site_params(lat, lng, radius)
-    params["business_type"] = _business_type(business_type)
-    return success(competitor_analysis(params))
+def competitors(q: CompetitorQuery = Depends(_competitor_query)):
+    return success(competitor_analysis(q.model_dump()))
 
 
 @router.get("/gaps")

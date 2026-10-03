@@ -1,103 +1,31 @@
 """Port of server/routes/demand-mix.js — requires auth."""
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from .. import db
 from ..auth import require_auth
+from ..common import PlainError
+from ..schemas.site import DemandMixQuery, demand_mix_error_message
+from ..services.demand_mix import demand_mix as demand_mix_service
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_auth)])
 
 
-@router.get("/demand-mix")
-def demand_mix(lat: str = None, lng: str = None, radius: str = "500"):
+def _demand_mix_query(lat: str = None, lng: str = None, radius: str = "500") -> DemandMixQuery:
     try:
-        lat_f, lng_f = float(lat), float(lng)
-    except (TypeError, ValueError):
-        return JSONResponse(status_code=400, content={"error": "lat/lng required"})
-    try:
-        radius_i = int(float(radius or "500"))
-    except (TypeError, ValueError):
-        radius_i = 500
-    if radius_i < 100 or radius_i > 5000:
-        return JSONResponse(status_code=400, content={"error": "radius must be 100–5000 m"})
+        return DemandMixQuery(lat=lat, lng=lng, radius=radius)
+    except ValidationError as e:
+        raise PlainError(demand_mix_error_message(e), 400)
 
-    sql = """
-    WITH site AS (
-      SELECT ST_Buffer(ST_SetSRID(ST_MakePoint(%(lng)s, %(lat)s), 4326)::geography, %(radius)s)::geometry AS buf
-    ),
-    valid_polys AS (
-      SELECT way, building, landuse, office, amenity
-      FROM planet_osm_polygon, site
-      WHERE ST_Intersects(way, site.buf)
-        AND ST_Area(way::geography) < 5000000
-    ),
-    office AS (
-      SELECT COALESCE(SUM(ST_Area(way::geography)), 0) AS area
-      FROM valid_polys
-      WHERE building IN ('office','commercial','retail')
-         OR landuse  IN ('commercial','retail')
-         OR office   IS NOT NULL
-    ),
-    residential AS (
-      SELECT COALESCE(SUM(ST_Area(way::geography)), 0) AS area
-      FROM valid_polys
-      WHERE building IN ('residential','apartments','house','dormitory','yes')
-         OR landuse = 'residential'
-    ),
-    college AS (
-      SELECT COALESCE(SUM(ST_Area(way::geography)), 0) AS area
-      FROM valid_polys
-      WHERE amenity IN ('college','university','school')
-         OR building = 'college'
-    ),
-    transit AS (
-      SELECT COUNT(*) * 2000 AS area
-      FROM planet_osm_point, site
-      WHERE ST_Intersects(way, site.buf)
-        AND (public_transport = 'station'
-             OR railway       = 'station'
-             OR highway       = 'bus_stop'
-             OR amenity       = 'bus_station')
-    )
-    SELECT
-      ROUND(office.area)      AS office_m2,
-      ROUND(residential.area) AS residential_m2,
-      ROUND(college.area)     AS college_m2,
-      transit.area            AS transit_m2
-    FROM office, residential, college, transit;
-    """
+
+@router.get("/demand-mix")
+def demand_mix(q: DemandMixQuery = Depends(_demand_mix_query)):
     try:
-        r = db.query_one(sql, {"lng": lng_f, "lat": lat_f, "radius": radius_i})
+        return demand_mix_service(q.lat, q.lng, q.radius)
     except Exception as e:
         print(f"[DemandMix] {e}")
         return JSONResponse(status_code=500, content={"error": "demand-mix query failed"})
-
-    office_m2 = db.num(r["office_m2"])
-    residential_m2 = db.num(r["residential_m2"])
-    college_m2 = db.num(r["college_m2"])
-    transit_m2 = db.num(r["transit_m2"])
-
-    total = office_m2 + residential_m2 + college_m2 + transit_m2
-    if total == 0:
-        mix = {"office": 0, "residential": 0, "college": 0, "transit": 0}
-    else:
-        mix = {
-            "office": round(office_m2 / total * 100),
-            "residential": round(residential_m2 / total * 100),
-            "college": round(college_m2 / total * 100),
-            "transit": round(transit_m2 / total * 100),
-        }
-
-    return {
-        "site": {"lat": lat_f, "lng": lng_f, "radius_m": radius_i},
-        "raw_areas_m2": {
-            "office_m2": office_m2, "residential_m2": residential_m2,
-            "college_m2": college_m2, "transit_m2": transit_m2,
-        },
-        "mix_pct": mix,
-        "profile": _classify_profile(mix),
-        "peak_pattern": _predict_peaks(mix),
-    }
 
 
 @router.get("/demand-mix-geo")
@@ -189,24 +117,3 @@ def demand_mix_geo(lat: str = None, lng: str = None, radius: str = "500"):
     print(f"[DemandMixGeo] {len(features)} features at ({lat_f},{lng_f}) r={radius_i} waySrid={way_srid}")
     return {"type": "FeatureCollection", "features": features}
 
-
-def _classify_profile(m):
-    top = sorted(m.items(), key=lambda kv: kv[1], reverse=True)[0]
-    if top[1] < 30:
-        return "mixed"
-    return f"{top[0]}_dominant"
-
-
-def _predict_peaks(m):
-    peaks = []
-    if m["office"] >= 25:
-        peaks += ["10:30–11:30 AM (office break)", "4–5 PM (evening break)"]
-    if m["college"] >= 25:
-        peaks += ["1–2 PM (lunch break)", "4–7 PM (post-class hangout)"]
-    if m["residential"] >= 25:
-        peaks += ["6–8 AM (breakfast chai)", "6–9 PM (evening social)"]
-    if m["transit"] >= 20:
-        peaks += ["7–10 AM (morning commute)", "5–8 PM (return commute)"]
-    if not peaks:
-        peaks.append("Insufficient demand drivers in walking radius")
-    return list(dict.fromkeys(peaks))  # de-dup, preserve order
